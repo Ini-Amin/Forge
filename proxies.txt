@@ -1,0 +1,2 @@
+# proxy pool for forge enum (one per line)
+# http://user:pass@host:port

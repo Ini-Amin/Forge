@@ -1,0 +1,9 @@
+# personal state — secrets, never commit
+.zbin_state.json
+last_run.json
+*.env
+*.secret
+# OS
+.DS_Store
+__pycache__/
+*.pyc
