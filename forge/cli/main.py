@@ -6,6 +6,7 @@ import json
 import os
 import random
 import sys
+import time
 from typing import Any, Optional
 
 from forge.cards.bins import BIN_DB
@@ -22,6 +23,13 @@ from forge.identity.generator import (
 )
 from forge.identity.geo import COUNTRIES, COUNTRY_LABEL, GEO
 from forge.transport.profiles import PROFILES, build_headers, get_impersonate_profile
+COUNTRY_CURRENCY = {
+    "US": "USD",
+    "JP": "JPY",
+    "ID": "IDR",
+    "DE": "EUR",
+    "BR": "BRL",
+}
 from forge.transport.proxy import matching_proxy, verify_proxy
 from forge.transport.session import EgressSecurityError, TLSSession
 from forge.defenders import (
@@ -120,51 +128,103 @@ def cmd_mock_test(a: argparse.Namespace) -> int:
 
 def cmd_run(a: argparse.Namespace) -> int:
     print(bold(BANNER))
-    print(bold(" forge run — identity + proxy + test cards, one flow\n"))
-    country = a.country or _ask("1. Select Country (US/JP/ID/DE/BR)", "US").upper()
-    target = a.target or _ask("2. Target URL (Enter = skip probe)", "")
-    count = int(_ask("3. How many test cards", "5"))
+    print(bold(" 🛠️  FORGE UNIFIED DEFENSIVE EMULATION PIPELINE\n"))
 
-    print(f"\n{dim('─' * 52)}\n{bold('  [1/4] identity')}")
+    # 1. Inputs: Region, Target URL, Card Count
+    country = getattr(a, "country", None) or _ask("1. Target Region (US/JP/ID/DE/BR)", "US").upper()
+    if country not in COUNTRIES:
+        country = "US"
+
+    target = getattr(a, "target", None)
+    if target is None:
+        target = _ask("2. Target Endpoint URL (Enter = offline staging audit)", "").strip()
+
+    count_val = getattr(a, "count", None)
+    count = int(count_val) if count_val else int(_ask("3. Number of test card fixtures", "5"))
+
+    print(f"\n{dim('━' * 60)}")
+    print(bold(f"  [1/5] SYNTHETIC IDENTITY & REGIONAL PROFILE ({country})"))
     fz = make_fullz(country)
-    for k, v in fz.items():
-        print(f"      {k:16}: {v}")
+    id_name = GEO[country].get("id_name", "national_id")
+    print(f"      Name     : {bold(fz['name'])}")
+    print(f"      Address  : {fz['address']}, {fz['city']}, {fz['state']} {fz['zip']}")
+    print(f"      Phone    : {fz['phone']}")
+    print(f"      {id_name.upper():<9}: {fz[id_name]}")
 
-    print(bold("\n  [2/4] country-matched proxy"))
+    print(bold("\n  [2/5] GEO-MATCHED EGRESS & TLS HANDSHAKE"))
     px = matching_proxy(fz)
     proxy_url = ""
+    exit_meta = {"country": country, "asn_type": "residential"}
     if px and px.get("proxy"):
         vv = verify_proxy(px["proxy"], expect_country=country)
-        print(f"      exit     : {vv.get('exit_ip') or px.get('host', '?')}  ({vv.get('country') or '?'})")
+        exit_ip = vv.get("exit_ip") or px.get("host", "?")
+        exit_country = vv.get("country") or country
+        exit_meta = {"country": exit_country, "asn_type": "residential"}
         if vv["ok"]:
-            print(f"      {ok('verified')}  TLS handshake + geo match ({vv['status']})")
+            print(f"      Exit IP  : {exit_ip} ({exit_country}) — {ok('TLS 1.3 Verified')}")
             proxy_url = px["proxy"]
         else:
-            print(bad(f"      FAILED: {vv.get('error')} (direct IP egress forbidden)"))
+            print(bad(f"      Exit IP  : {exit_ip} — FAILED ({vv.get('error')})"))
+            print(bad("      Security : Direct IP egress forbidden. Halting live probe."))
     else:
-        print(bad("      no proxy provider available (direct IP forbidden)"))
+        print(warn("      Proxy    : No proxy available. Evaluating offline diagnostics."))
 
-    print(bold("\n  [3/4] proxy ↔ target probe (TLS-fingerprinted)"))
+    prof = get_impersonate_profile()
+    hdrs = build_headers(prof)
+    idemp_key = f"forge_{int(time.time())}_{random.randint(1000, 9999)}"
+    hdrs["Idempotency-Key"] = idemp_key
+
+    # Live target probe if specified
+    print(bold("\n  [3/5] TARGET ENDPOINT PROBE & TIMING"))
     if target:
         if not proxy_url:
-            print(bad("      probe aborted: valid proxy required (direct IP egress forbidden)"))
+            print(warn("      Target probe skipped: strict fail-closed requires verified proxy."))
         else:
             try:
+                start_t = time.monotonic()
                 with TLSSession(proxy_url, strict_proxy=True) as s:
-                    r = s.get(target)
-                m = ok(f"HTTP {r.status_code}") if r.status_code < 400 else bad(f"HTTP {r.status_code}")
-                print(f"      {m} via proxy ({len(r.content)} bytes)")
+                    r = s.get(target, timeout=10.0, headers=hdrs)
+                dur = (time.monotonic() - start_t) * 1000.0
+                st_code = r.status_code
+                status_badge = ok(f"HTTP {st_code}") if st_code < 400 else bad(f"HTTP {st_code}")
+                print(f"      Target   : {target}")
+                print(f"      Response : {status_badge} ({len(r.content)} bytes in {dur:.1f}ms)")
             except Exception as e:
-                print(bad(f"      unreachable: {type(e).__name__}: {e}"))
+                print(bad(f"      Target   : {target} — Unreachable ({e})"))
     else:
-        print(dim("      skipped (no target given)"))
+        print(dim("      Target   : Offline mode (evaluating staging defense layers)"))
 
-    print(bold("\n  [4/4] test cards"))
-    cards = generate_random("414720", "09", "31", count, card_storage=storage)
+    # 4-Layer Funnel Simulation
+    print(bold("\n  [4/5] 4-LAYER TRANSACTION FUNNEL SIMULATION"))
+    card_meta = BIN_DB.get("414720", {"network": "Visa", "issuer": "Chase", "country": country})
+    funnel = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
+
+    for l in funnel.layers:
+        v_icon = ok("✔") if l.verdict == "PASS" else (warn("!") if l.verdict == "FLAG" else bad("✘"))
+        print(f"      {v_icon} {l.layer_name:<22} [{l.verdict:<5}] (+{l.score_penalty} pts, {l.latency_ms}ms)")
+        for d in l.details:
+            print(dim(f"          • {d}"))
+
+    disp_badge = ok(funnel.final_disposition) if funnel.final_disposition == "SETTLED" else (
+        warn(funnel.final_disposition) if "3DS" in funnel.final_disposition else bad(funnel.final_disposition)
+    )
+    print(f"\n      Funnel Result : {disp_badge} (Total Risk: {funnel.total_risk_score}/100)")
+    if funnel.vulnerabilities_detected:
+        for v in funnel.vulnerabilities_detected:
+            print(bad(f"      ! VULNERABILITY: {v}"))
+
+    # Currency & Luhn Test Cards
+    curr = COUNTRY_CURRENCY.get(country, "USD")
+    curr_chk = CurrencyPrecisionAuditor.audit_amount_to_units(curr, 100.0)
+    print(bold(f"\n  [5/5] REGIONAL CURRENCY & CARD FIXTURES ({curr})"))
+    print(f"      Currency : {curr} (Zero-Decimal: {curr_chk.is_zero_decimal})")
+    print(f"      Fixtures : {count} Luhn ISO/IEC 7812 test cards generated:")
+    cards = generate_random("414720", "12", "30", count, card_storage=storage)
     for c in cards:
-        print(f"      {format_card(c, 'pipe')}")
+        print(f"          • {format_card(c, 'pipe')}")
 
-    print(f"{dim('─' * 52)}\n{ok('✔')} workflow completed.\n")
+    print(f"\n{dim('━' * 60)}")
+    print(ok("  ✔ Unified Forge evaluation completed successfully.\n"))
     return 0
 
 def cmd_audit_risk(a: argparse.Namespace) -> int:
@@ -425,8 +485,8 @@ def build_parser() -> argparse.ArgumentParser:
 def main() -> int:
     parser = build_parser()
     if len(sys.argv) == 1:
-        parser.print_help()
-        return 0
+        # Default zero-friction UX: launch unified wizard immediately
+        return cmd_run(argparse.Namespace(country=None, target=None, count=None, json=False, cmd="run"))
 
     args = parser.parse_args()
     try:
