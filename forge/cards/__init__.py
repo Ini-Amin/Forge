@@ -3,6 +3,7 @@ from forge.cards.bins import BIN_DB, COUNTRY_DEFAULT_BIN, card_length, get_defau
 from forge.cards.luhn import (
     card_hash,
     format_card,
+    generate_expiry_date,
     generate_random,
     generate_sequential,
     is_luhn_valid,
@@ -18,6 +19,7 @@ __all__ = [
     "card_hash",
     "card_length",
     "format_card",
+    "generate_expiry_date",
     "generate_random",
     "generate_sequential",
     "is_luhn_valid",

@@ -1,16 +1,15 @@
 """forge.transport.proxy - Proxy providers, verification, and rotation."""
 from __future__ import annotations
-
 import json
+import os
 import time
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from forge.config import CACHE_DIR
+from forge.config import CACHE_DIR, DEFAULT_PROXIES_FILE
 from forge.transport.session import TLSSession
-
 PROXY_PROVIDERS: list[Callable[[str], Optional[dict[str, Any]]]] = []
 
 
@@ -170,6 +169,48 @@ def urban_vpn_pool(country: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def env_proxy_provider(country: str) -> Optional[dict[str, Any]]:
+    """Provider checking standard environment variables: FORGE_PROXY, HTTPS_PROXY, HTTP_PROXY."""
+    env_val = os.environ.get("FORGE_PROXY") or os.environ.get("HTTPS_PROXY") or os.environ.get("HTTP_PROXY")
+    if env_val and env_val.strip():
+        proxy_clean = env_val.strip()
+        if "://" not in proxy_clean:
+            proxy_clean = f"http://{proxy_clean}"
+        return {
+            "provider": "environment",
+            "country": country.upper(),
+            "proxy": proxy_clean,
+        }
+    return None
+
+
+def local_file_proxy_provider(country: str) -> Optional[dict[str, Any]]:
+    """Provider reading custom proxies from proxies.txt (config dir or working dir)."""
+    candidates = [DEFAULT_PROXIES_FILE, Path("proxies.txt"), Path("../proxies.txt")]
+    for path in candidates:
+        if path.is_file():
+            try:
+                for line in path.read_text().splitlines():
+                    p = line.strip()
+                    if p and not p.startswith("#"):
+                        if "://" not in p:
+                            p = f"http://{p}"
+                        return {
+                            "provider": f"file:{path.name}",
+                            "country": country.upper(),
+                            "proxy": p,
+                        }
+            except Exception:
+                continue
+    return None
+
+
+# Priority resolution order:
+# 1. Environment variables (highest priority)
+# 2. Local proxies.txt file
+# 3. Dynamic residential VPN rotation
+register_proxy_provider(env_proxy_provider)
+register_proxy_provider(local_file_proxy_provider)
 register_proxy_provider(urban_vpn_pool)
 register_proxy_provider(urban_vpn_single)
 

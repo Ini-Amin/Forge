@@ -23,6 +23,7 @@ from forge.identity.geo import (
     format_phone,
     id_nik,
     jp_my_number,
+    uk_nino,
     us_ssn,
 )
 
@@ -136,6 +137,8 @@ def make_fullz(country: str = "US", seed: Optional[int] = None) -> dict[str, Any
         nat_id = jp_my_number(rnd=rnd)
     elif id_name == "cpf":
         nat_id = br_cpf(rnd=rnd)
+    elif id_name == "nino":
+        nat_id = uk_nino(rnd=rnd)
     else:
         nat_id = de_steuer(rnd=rnd)
 

@@ -5,6 +5,7 @@ import hashlib
 import json
 import random
 import string
+import time
 from typing import Any, Dict, List, Optional
 
 from forge.cards.bins import card_length, issuer_lookup
@@ -54,13 +55,19 @@ def format_card(card: dict[str, Any], fmt: str = "pipe") -> str:
     if fmt == "json":
         return json.dumps(card)
     return f"{card['pan']}|{card['mm']}|{card['yy']}|{card['cvv']}"
+def generate_expiry_date(rnd: Any = random, min_years: int = 1, max_years: int = 4) -> tuple[str, str]:
+    """Generate dynamic rolling future expiry month (01-12) and 2-digit year (YY)."""
+    curr_yy = time.localtime().tm_year % 100
+    future_yy = curr_yy + rnd.randint(min_years, max_years)
+    month = rnd.randint(1, 12)
+    return f"{month:02d}", f"{future_yy:02d}"
 
 
 def generate_random(
     bin_: str,
-    exp_m: str,
-    exp_y: str,
-    count: int,
+    exp_m: Optional[str] = None,
+    exp_y: Optional[str] = None,
+    count: int = 5,
     card_storage: Optional[CardStorage] = None,
     seed: Optional[int] = None
 ) -> list[dict[str, Any]]:
@@ -87,10 +94,15 @@ def generate_random(
         cs.record_card(h, pan, bin_)
         cvv = "".join(rnd.choices(string.digits, k=cvv_len))
         meta = issuer_lookup(pan)
+        if not exp_m or exp_m == "auto" or not exp_y or exp_y == "auto":
+            card_mm, card_yy = generate_expiry_date(rnd=rnd)
+        else:
+            card_mm, card_yy = exp_m, exp_y
+
         out.append({
             "pan": pan,
-            "mm": exp_m,
-            "yy": exp_y,
+            "mm": card_mm,
+            "yy": card_yy,
             "cvv": cvv,
             "issuer": meta["issuer"],
             "network": meta["network"],

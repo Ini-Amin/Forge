@@ -4,6 +4,7 @@ import unittest
 from forge.cards.bins import card_length, issuer_lookup
 from forge.cards.luhn import (
     format_card,
+    generate_expiry_date,
     generate_random,
     generate_sequential,
     is_luhn_valid,
@@ -63,6 +64,15 @@ class TestLuhnCards(unittest.TestCase):
         card = {"pan": "4242424242424242", "mm": "12", "yy": "30", "cvv": "123", "issuer": "Test", "network": "Visa"}
         self.assertEqual(format_card(card, "pipe"), "4242424242424242|12|30|123")
         self.assertIn("4242424242424242,12,30,123", format_card(card, "csv"))
+    def test_dynamic_rolling_expiry(self):
+        mm, yy = generate_expiry_date()
+        self.assertTrue(1 <= int(mm) <= 12)
+        self.assertTrue(len(yy) == 2 and yy.isdigit())
+
+        cards = generate_random("414720", exp_m="auto", exp_y="auto", count=3)
+        for c in cards:
+            self.assertTrue(1 <= int(c["mm"]) <= 12)
+            self.assertTrue(len(c["yy"]) == 2)
 
 
 if __name__ == "__main__":

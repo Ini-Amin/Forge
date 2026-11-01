@@ -19,6 +19,8 @@ BIN_DB: dict[str, dict[str, Any]] = {
     "510001": {"network": "Mastercard", "issuer": "Commerzbank", "country": "DE"},
     "400403": {"network": "Visa", "issuer": "Banco do Brasil", "country": "BR"},
     "544828": {"network": "Mastercard", "issuer": "Itau Unibanco", "country": "BR"},
+    "475127": {"network": "Visa", "issuer": "Barclays Bank", "country": "GB"},
+    "400022": {"network": "Visa", "issuer": "HSBC UK", "country": "GB"},
 }
 
 COUNTRY_DEFAULT_BIN: dict[str, str] = {
@@ -27,6 +29,7 @@ COUNTRY_DEFAULT_BIN: dict[str, str] = {
     "ID": "461700",
     "DE": "455642",
     "BR": "400403",
+    "GB": "475127",
 }
 
 

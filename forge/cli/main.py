@@ -7,6 +7,7 @@ import os
 import random
 import sys
 import time
+from pathlib import Path
 from typing import Any, Optional
 
 from forge.cards.bins import BIN_DB, get_default_bin_for_country, issuer_lookup
@@ -23,8 +24,10 @@ from forge.identity.generator import (
 )
 from forge.identity.geo import COUNTRIES, COUNTRY_LABEL, GEO
 from forge.transport.profiles import PROFILES, build_headers, get_impersonate_profile
+from forge.config import DATA_DIR
 COUNTRY_CURRENCY = {
     "US": "USD",
+    "GB": "GBP",
     "JP": "JPY",
     "ID": "IDR",
     "DE": "EUR",
@@ -131,7 +134,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     print(bold(" 🛠️  FORGE UNIFIED DEFENSIVE EMULATION PIPELINE\n"))
 
     # 1. Inputs: Region, Target URL, Card Count
-    country = getattr(a, "country", None) or _ask("1. Target Region (US/JP/ID/DE/BR)", "US").upper()
+    country = getattr(a, "country", None) or _ask("1. Target Region (US/GB/JP/ID/DE/BR)", "US").upper()
     if country not in COUNTRIES:
         country = "US"
 
@@ -139,8 +142,12 @@ def cmd_run(a: argparse.Namespace) -> int:
     if target is None:
         target = _ask("2. Target Endpoint URL (Enter = offline staging audit)", "").strip()
 
+    auth_token = getattr(a, "auth", None) or os.environ.get("FORGE_AUTH_TOKEN", "")
+    if target and not auth_token and sys.stdin.isatty():
+        auth_token = _ask("3. Authorization Bearer / Token (Enter = none)", "").strip()
+
     count_val = getattr(a, "count", None)
-    count = int(count_val) if count_val else int(_ask("3. Number of test card fixtures", "5"))
+    count = int(count_val) if count_val else int(_ask("4. Number of test card fixtures", "5"))
 
     print(f"\n{dim('━' * 60)}")
     print(bold(f"  [1/5] SYNTHETIC IDENTITY & REGIONAL PROFILE ({country})"))
@@ -173,6 +180,15 @@ def cmd_run(a: argparse.Namespace) -> int:
     hdrs = build_headers(prof)
     idemp_key = f"forge_{int(time.time())}_{random.randint(1000, 9999)}"
     hdrs["Idempotency-Key"] = idemp_key
+    if auth_token:
+        hdrs["Authorization"] = f"Bearer {auth_token}" if not auth_token.startswith("Bearer ") else auth_token
+
+    curr = COUNTRY_CURRENCY.get(country, "USD")
+    method = getattr(a, "method", None)
+    if not method and target:
+        # Detect whether endpoint expects mutation POST vs informational GET
+        method = "POST" if any(p in target.lower() for p in ("/checkout", "/pay", "/charge", "/confirm", "/intent", "/v1/")) else "GET"
+    method = (method or "GET").upper()
 
     # Live target probe if specified
     print(bold("\n  [3/5] TARGET ENDPOINT PROBE & TIMING"))
@@ -183,14 +199,18 @@ def cmd_run(a: argparse.Namespace) -> int:
             try:
                 start_t = time.monotonic()
                 with TLSSession(proxy_url, strict_proxy=True) as s:
-                    r = s.get(target, timeout=10.0, headers=hdrs)
+                    if method == "POST":
+                        probe_payload = {"session_id": idemp_key, "amount": 100, "currency": curr.lower()}
+                        r = s.post(target, json=probe_payload, timeout=10.0, headers=hdrs)
+                    else:
+                        r = s.get(target, timeout=10.0, headers=hdrs)
                 dur = (time.monotonic() - start_t) * 1000.0
                 st_code = r.status_code
                 status_badge = ok(f"HTTP {st_code}") if st_code < 400 else bad(f"HTTP {st_code}")
-                print(f"      Target   : {target}")
+                print(f"      Target   : {target} [{method}]")
                 print(f"      Response : {status_badge} ({len(r.content)} bytes in {dur:.1f}ms)")
             except Exception as e:
-                print(bad(f"      Target   : {target} — Unreachable ({e})"))
+                print(bad(f"      Target   : {target} [{method}] — Unreachable ({e})"))
     else:
         print(dim("      Target   : Offline mode (evaluating staging defense layers)"))
 
@@ -219,10 +239,35 @@ def cmd_run(a: argparse.Namespace) -> int:
     curr_chk = CurrencyPrecisionAuditor.audit_amount_to_units(curr, 100.0)
     print(bold(f"\n  [5/5] REGIONAL CURRENCY & CARD FIXTURES ({curr})"))
     print(f"      Currency : {curr} (Zero-Decimal: {curr_chk.is_zero_decimal})")
-    print(f"      Fixtures : {count} Luhn ISO/IEC 7812 test cards generated ({card_meta['network']} - {card_meta['issuer']}):")
-    cards = generate_random(bin_, "12", "30", count, card_storage=storage)
+    cards = generate_random(bin_, exp_m="auto", exp_y="auto", count=count, card_storage=storage)
     for c in cards:
         print(f"          • {format_card(c, 'pipe')}")
+
+    # Save audit trail report artifact
+    audit_data = {
+        "timestamp": time.time(),
+        "country": country,
+        "target": target or None,
+        "method": method if target else None,
+        "identity": fz,
+        "egress": exit_meta,
+        "funnel": {
+            "final_disposition": funnel.final_disposition,
+            "total_risk_score": funnel.total_risk_score,
+            "layers": [l.__dict__ for l in funnel.layers],
+            "vulnerabilities": funnel.vulnerabilities_detected,
+            "recommendations": funnel.recommendations,
+        },
+        "currency": curr,
+        "cards": cards,
+    }
+    out_file = Path(getattr(a, "output", None) or (DATA_DIR / "last_audit.json"))
+    try:
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+        out_file.write_text(json.dumps(audit_data, indent=2))
+        print(f"\n      Audit Log: Saved report artifact to {out_file}")
+    except Exception:
+        pass
 
     print(f"\n{dim('━' * 60)}")
     print(ok("  ✔ Unified Forge evaluation completed successfully.\n"))
@@ -275,8 +320,10 @@ def cmd_decline(a: argparse.Namespace) -> int:
     return 0
 def cmd_funnel(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
+    fz = make_fullz(country)
     bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
     card_meta = issuer_lookup(bin_)
+    px = matching_proxy(fz)
     exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
     prof = get_impersonate_profile()
     hdrs = build_headers(prof)
@@ -447,7 +494,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_run = sub.add_parser("run", help="Interactive workflow wizard")
     p_run.add_argument("-c", "--country", choices=COUNTRIES, default=None)
     p_run.add_argument("-t", "--target", default=None)
-
+    p_run.add_argument("--auth", default=None, help="Authorization / Bearer token")
+    p_run.add_argument("--method", choices=["GET", "POST"], default=None, help="HTTP method for target probe")
+    p_run.add_argument("-o", "--output", default=None, help="Path to save audit report JSON")
     # test-mock
     p_mock = sub.add_parser("test-mock", help="Test local mock server (e.g. stripe-mock)")
     p_mock.add_argument("--url", default=None, help="Local mock endpoint URL")

@@ -10,10 +10,11 @@ from __future__ import annotations
 import random
 from typing import Dict, Tuple
 
-COUNTRIES = ["US", "JP", "ID", "DE", "BR"]
+COUNTRIES = ["US", "GB", "JP", "ID", "DE", "BR"]
 
 COUNTRY_LABEL = {
     "US": "United States",
+    "GB": "United Kingdom",
     "JP": "Japan",
     "ID": "Indonesia",
     "DE": "Germany",
@@ -39,6 +40,18 @@ GEO: dict[str, dict] = {
                       "streets": ["Congress Ave", "E 6th St", "W 5th St", "Lavaca St"]},
         },
         "ssn_state_block": {"NY": 50, "CA": 550, "IL": 320, "FL": 260, "WA": 530, "TX": 460},
+    },
+    "GB": {
+        "phone_fmt": "+44 7nnn nnnnnn",
+        "id_name": "nino",
+        "cities": {
+            "EC1A 1BB": {"city": "London", "state": "Greater London", "area": "20",
+                         "streets": ["Baker St", "Oxford St", "Piccadilly", "Fleet St"]},
+            "M1 1AD": {"city": "Manchester", "state": "Greater Manchester", "area": "161",
+                       "streets": ["Deansgate", "Market St", "King St", "Portland St"]},
+            "EH1 1YZ": {"city": "Edinburgh", "state": "Midlothian", "area": "131",
+                        "streets": ["Princes St", "George St", "Royal Mile", "Rose St"]},
+        },
     },
     "JP": {
         "phone_fmt": "090-nnnn-nnnn",
@@ -107,6 +120,12 @@ NAMES: dict[str, dict[str, tuple[str, ...]]] = {
         "last": ("Pratama", "Saputra", "Wijaya", "Hidayat", "Nugroho", "Setiawan",
                  "Kusuma", "Permana", "Gunawan", "Santoso", "Wibowo", "Lestari"),
     },
+    "GB": {
+        "first": ("Oliver", "George", "Arthur", "Noah", "Olivia", "Amelia",
+                  "Isla", "Ava", "Harry", "Jack", "Emily", "Charlotte"),
+        "last": ("Smith", "Jones", "Taylor", "Brown", "Williams", "Wilson",
+                 "Johnson", "Davies", "Robinson", "Wright", "Thompson", "Evans"),
+    },
     "DE": {
         "first": ("Lukas", "Felix", "Jonas", "Leon", "Anna", "Lena", "Julia",
                   "Sophie", "Maximilian", "Niklas", "Elena", "Laura"),
@@ -155,6 +174,13 @@ def jp_my_number(rnd: Any = random) -> str:
     check = 0 if check <= 1 else 11 - check
     digits.append(check)
     return "".join(map(str, digits))
+def uk_nino(rnd: Any = random) -> str:
+    """UK National Insurance Number (NINO) format: e.g. QQ 12 34 56 A."""
+    letters = "ABCDEFGHJKLMNPRSTWXYZ"
+    prefix = rnd.choice("ABCEGHJKLMNOPRSTWXYZ") + rnd.choice(letters)
+    digits = f"{rnd.randint(100000, 999999):06d}"
+    suffix = rnd.choice("ABCD")
+    return f"{prefix} {digits[:2]} {digits[2:4]} {digits[4:6]} {suffix}"
 
 
 def br_cpf(rnd: Any = random) -> str:
