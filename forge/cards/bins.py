@@ -13,7 +13,26 @@ BIN_DB: dict[str, dict[str, Any]] = {
     "601100": {"network": "Discover", "issuer": "Discover Financial", "country": "US"},
     "353011": {"network": "JCB", "issuer": "JCB International", "country": "JP"},
     "401288": {"network": "Visa", "issuer": "Bank of America", "country": "US"},
+    "461700": {"network": "Visa", "issuer": "Bank Mandiri", "country": "ID"},
+    "521114": {"network": "Mastercard", "issuer": "Bank Central Asia", "country": "ID"},
+    "455642": {"network": "Visa", "issuer": "Deutsche Bank", "country": "DE"},
+    "510001": {"network": "Mastercard", "issuer": "Commerzbank", "country": "DE"},
+    "400403": {"network": "Visa", "issuer": "Banco do Brasil", "country": "BR"},
+    "544828": {"network": "Mastercard", "issuer": "Itau Unibanco", "country": "BR"},
 }
+
+COUNTRY_DEFAULT_BIN: dict[str, str] = {
+    "US": "414720",
+    "JP": "353011",
+    "ID": "461700",
+    "DE": "455642",
+    "BR": "400403",
+}
+
+
+def get_default_bin_for_country(country: str) -> str:
+    """Return a geo-coherent default BIN matching the target country."""
+    return COUNTRY_DEFAULT_BIN.get(country.upper(), "414720")
 
 
 def card_length(bin_: str) -> int:

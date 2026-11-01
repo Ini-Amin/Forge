@@ -9,7 +9,7 @@ import sys
 import time
 from typing import Any, Optional
 
-from forge.cards.bins import BIN_DB
+from forge.cards.bins import BIN_DB, get_default_bin_for_country, issuer_lookup
 from forge.cards.luhn import format_card, generate_random, is_luhn_valid
 from forge.cards.storage import storage
 from forge.cli.doctor import bad, bold, dim, ok, run_doctor, warn
@@ -196,7 +196,8 @@ def cmd_run(a: argparse.Namespace) -> int:
 
     # 4-Layer Funnel Simulation
     print(bold("\n  [4/5] 4-LAYER TRANSACTION FUNNEL SIMULATION"))
-    card_meta = BIN_DB.get("414720", {"network": "Visa", "issuer": "Chase", "country": country})
+    bin_ = getattr(a, "bin", None) or get_default_bin_for_country(country)
+    card_meta = issuer_lookup(bin_)
     funnel = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
 
     for l in funnel.layers:
@@ -218,8 +219,8 @@ def cmd_run(a: argparse.Namespace) -> int:
     curr_chk = CurrencyPrecisionAuditor.audit_amount_to_units(curr, 100.0)
     print(bold(f"\n  [5/5] REGIONAL CURRENCY & CARD FIXTURES ({curr})"))
     print(f"      Currency : {curr} (Zero-Decimal: {curr_chk.is_zero_decimal})")
-    print(f"      Fixtures : {count} Luhn ISO/IEC 7812 test cards generated:")
-    cards = generate_random("414720", "12", "30", count, card_storage=storage)
+    print(f"      Fixtures : {count} Luhn ISO/IEC 7812 test cards generated ({card_meta['network']} - {card_meta['issuer']}):")
+    cards = generate_random(bin_, "12", "30", count, card_storage=storage)
     for c in cards:
         print(f"          • {format_card(c, 'pipe')}")
 
@@ -230,8 +231,8 @@ def cmd_run(a: argparse.Namespace) -> int:
 def cmd_audit_risk(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
     fz = make_fullz(country)
-    card_meta = BIN_DB.get(a.bin, {"network": "Visa", "issuer": "Test", "country": country})
-    px = matching_proxy(fz)
+    bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
+    card_meta = issuer_lookup(bin_)
     exit_meta = {"country": px.get("country", country) if px else ""}
     prof = get_impersonate_profile()
 
@@ -274,9 +275,8 @@ def cmd_decline(a: argparse.Namespace) -> int:
     return 0
 def cmd_funnel(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
-    fz = make_fullz(country)
-    card_meta = BIN_DB.get(a.bin, {"network": "Visa", "issuer": "Test", "country": country})
-    px = matching_proxy(fz)
+    bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
+    card_meta = issuer_lookup(bin_)
     exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
     prof = get_impersonate_profile()
     hdrs = build_headers(prof)
