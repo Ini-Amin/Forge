@@ -24,7 +24,9 @@ from forge.identity.geo import COUNTRIES, COUNTRY_LABEL, GEO
 from forge.transport.profiles import PROFILES, build_headers, get_impersonate_profile
 from forge.transport.proxy import matching_proxy, verify_proxy
 from forge.transport.session import EgressSecurityError, TLSSession
-
+from forge.defenders.fraud_audit import FraudRiskAuditor
+from forge.payments.decline_codes import DeclineCodeTaxonomy
+from forge.payments.state_machine import PaymentStateMachine
 BANNER = r"""
   ███████╗ ██████╗ ██████╗  ██████╗ ███████╗
   ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝
@@ -158,6 +160,51 @@ def cmd_run(a: argparse.Namespace) -> int:
     print(f"{dim('─' * 52)}\n{ok('✔')} workflow completed.\n")
     return 0
 
+def cmd_audit_risk(a: argparse.Namespace) -> int:
+    country = a.country.upper() if a.country else "US"
+    fz = make_fullz(country)
+    card_meta = BIN_DB.get(a.bin, {"network": "Visa", "issuer": "Test", "country": country})
+    px = matching_proxy(fz)
+    exit_meta = {"country": px.get("country", country) if px else ""}
+    prof = get_impersonate_profile()
+
+    audit = FraudRiskAuditor.full_audit(fz, card_meta, exit_meta, prof)
+    if a.json:
+        print(json.dumps(audit, indent=2))
+        return 0
+
+    print(bold(f"\n forge fraud risk audit — {country}\n" + "─" * 52))
+    print(f"  Risk Score        : {audit['total_risk_score']}/100")
+    print(f"  Radar Decision    : {audit['radar_decision']}")
+    print(f"  3DS Frictionless  : {'YES' if audit['frictionless_eligible'] else 'NO (Challenge Required)'}")
+    print(dim("─" * 52))
+    print(f"  AVS Code          : {audit['components']['avs']['avs_code']} (Penalty: {audit['components']['avs']['risk_penalty']})")
+    print(f"  Geo-IP Egress     : {audit['components']['geo_egress']['egress_country']} (Penalty: {audit['components']['geo_egress']['risk_penalty']})")
+    print(f"  TLS Profile       : {audit['components']['fingerprint']['tls_profile']} (Penalty: {audit['components']['fingerprint']['risk_penalty']})")
+    if audit['components']['avs']['reasons']:
+        for r in audit['components']['avs']['reasons']:
+            print(warn(f"    ! AVS: {r}"))
+    if audit['components']['geo_egress']['reasons']:
+        for r in audit['components']['geo_egress']['reasons']:
+            print(warn(f"    ! Geo: {r}"))
+    print("─" * 52)
+    return 0
+
+
+def cmd_decline(a: argparse.Namespace) -> int:
+    analysis = DeclineCodeTaxonomy.analyze(a.code)
+    if a.json:
+        print(json.dumps(analysis.__dict__, indent=2))
+        return 0
+
+    print(bold(f"\n forge decline analyzer — {a.code}\n" + "─" * 52))
+    print(f"  Category          : {analysis.category}")
+    print(f"  Retryable         : {'YES' if analysis.is_retryable else 'NO (Hard Decline)'}")
+    print(f"  ISO 8583 Code     : {analysis.iso_8583_equivalent}")
+    print(f"  Description       : {analysis.description}")
+    print(f"  Remediation       : {analysis.recommended_action}")
+    print("─" * 52)
+    return 0
 
 def cmd_selftest(a: argparse.Namespace) -> int:
     for c in COUNTRIES:
@@ -216,6 +263,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_mock = sub.add_parser("test-mock", help="Test local mock server (e.g. stripe-mock)")
     p_mock.add_argument("--url", default=None, help="Local mock endpoint URL")
 
+    # audit
+    p_audit = sub.add_parser("audit", help="Audit transaction telemetry against fraud scoring heuristics")
+    p_audit.add_argument("-c", "--country", choices=COUNTRIES, default="US")
+    p_audit.add_argument("--bin", default="414720")
+    p_audit.add_argument("--json", action="store_true")
+
+    # decline
+    p_dec = sub.add_parser("decline", help="Analyze gateway/issuer decline code and ISO 8583 mapping")
+    p_dec.add_argument("code", help="Decline code (e.g. authentication_required, insufficient_funds, stolen_card)")
+    p_dec.add_argument("--json", action="store_true")
     return p
 
 
@@ -241,6 +298,10 @@ def main() -> int:
             return cmd_run(args)
         elif args.cmd == "test-mock":
             return cmd_mock_test(args)
+        elif args.cmd == "audit":
+            return cmd_audit_risk(args)
+        elif args.cmd == "decline":
+            return cmd_decline(args)
         else:
             parser.print_help()
             return 0

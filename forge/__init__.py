@@ -43,9 +43,18 @@ from forge.transport import (
     register_proxy_provider,
     verify_proxy,
 )
+from forge.defenders import FraudRiskAuditor
+from forge.payments import (
+    DeclineAnalysis,
+    DeclineCodeTaxonomy,
+    IdempotencyManager,
+    IdempotencyRecord,
+    NextActionInspection,
+    PaymentGatewayClient,
+    PaymentStateMachine,
+)
 
-__version__ = "3.0.0"
-
+__version__ = "3.1.0"
 __all__ = [
     "AsyncTLSSession",
     "BIN_DB",
@@ -89,4 +98,12 @@ __all__ = [
     "storage",
     "username",
     "verify_proxy",
+    "DeclineAnalysis",
+    "DeclineCodeTaxonomy",
+    "FraudRiskAuditor",
+    "IdempotencyManager",
+    "IdempotencyRecord",
+    "NextActionInspection",
+    "PaymentGatewayClient",
+    "PaymentStateMachine",
 ]
