@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import os
 import random
@@ -9,6 +10,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlparse
 
 from forge.cards.bins import BIN_DB, get_default_bin_for_country, issuer_lookup
 from forge.cards.luhn import format_card, generate_random, is_luhn_valid
@@ -45,6 +47,16 @@ from forge.defenders import (
 )
 from forge.payments.decline_codes import DeclineCodeTaxonomy
 from forge.payments.state_machine import PaymentStateMachine
+def is_local_or_private_target(url: str) -> bool:
+    """Return True if target is a loopback, local development, or private network address."""
+    host = (urlparse(url).hostname or "").lower()
+    if host in ("localhost", "127.0.0.1", "::1") or host.endswith(".local") or host.endswith(".internal"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return ip.is_private or ip.is_loopback
+    except ValueError:
+        return False
 BANNER = r"""
   ███████╗ ██████╗ ██████╗  ██████╗ ███████╗
   ██╔════╝██╔═══██╗██╔══██╗██╔════╝ ██╔════╝
@@ -193,12 +205,16 @@ def cmd_run(a: argparse.Namespace) -> int:
     # Live target probe if specified
     print(bold("\n  [3/5] TARGET ENDPOINT PROBE & TIMING"))
     if target:
-        if not proxy_url:
-            print(warn("      Target probe skipped: strict fail-closed requires verified proxy."))
+        is_private = is_local_or_private_target(target)
+        if not is_private and not proxy_url:
+            print(warn("      Target probe skipped: strict fail-closed requires verified proxy for public targets."))
         else:
+            active_proxy = None if is_private else proxy_url
+            strict = not is_private
+            route_label = "direct internal target" if is_private else "via verified proxy"
             try:
                 start_t = time.monotonic()
-                with TLSSession(proxy_url, strict_proxy=True) as s:
+                with TLSSession(active_proxy, strict_proxy=strict) as s:
                     if method == "POST":
                         probe_payload = {"session_id": idemp_key, "amount": 100, "currency": curr.lower()}
                         r = s.post(target, json=probe_payload, timeout=10.0, headers=hdrs)
@@ -207,13 +223,12 @@ def cmd_run(a: argparse.Namespace) -> int:
                 dur = (time.monotonic() - start_t) * 1000.0
                 st_code = r.status_code
                 status_badge = ok(f"HTTP {st_code}") if st_code < 400 else bad(f"HTTP {st_code}")
-                print(f"      Target   : {target} [{method}]")
+                print(f"      Target   : {target} [{method}] ({route_label})")
                 print(f"      Response : {status_badge} ({len(r.content)} bytes in {dur:.1f}ms)")
             except Exception as e:
                 print(bad(f"      Target   : {target} [{method}] — Unreachable ({e})"))
     else:
         print(dim("      Target   : Offline mode (evaluating staging defense layers)"))
-
     # 4-Layer Funnel Simulation
     print(bold("\n  [4/5] 4-LAYER TRANSACTION FUNNEL SIMULATION"))
     bin_ = getattr(a, "bin", None) or get_default_bin_for_country(country)
