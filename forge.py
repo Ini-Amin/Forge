@@ -147,7 +147,7 @@ class BrowserSession:
     """
     def __init__(self, proxy_url=None):
         self.profile = random.choice(PROFILES)
-        self.session = cffi_requests.Session()
+        self.session = _cffi_requests.Session()
         self.session.impersonate = self.profile["impersonate"]
         if proxy_url:
             self.session.proxies = {"http": proxy_url, "https": proxy_url}
@@ -536,37 +536,6 @@ def _urban_vpn_provider(country: str) -> dict | None:
                    token=s["sec_tok"])["value"]
     return {"provider": "urban_vpn", "country": country, "host": host,
             "port": port, "proxy": f"http://{tok}:1@{host}:{port}"}
-    try:
-        countries = get(f"{stats}/entrypoints/countries", token=s["sec_tok"])
-    except urllib.error.HTTPError as e:
-        if e.code != 401:
-            raise
-        s = session()
-        countries = get(f"{stats}/entrypoints/countries", token=s["sec_tok"])
-
-    # Response shape: {"countries": {"elements": [...]}} — one nesting deeper
-    # than the extension's service worker reads it.
-    payload = countries.get("countries", countries) if isinstance(countries, dict) else countries
-    elements = (payload.get("elements") if isinstance(payload, dict) else payload) or []
-
-    chosen = None
-    for el in elements:
-        if el.get("code", {}).get("iso2", "").upper() == country.upper() \
-                and el.get("servers", {}).get("elements"):
-            chosen = el["servers"]["elements"][0]
-            break
-    if not chosen:
-        return None
-
-    host = chosen["address"]["primary"]["host"]
-    port = chosen["address"]["primary"]["port"]
-    tok = post(f"{base}/security/tokens/accs-proxy",
-               {"type": "accs-proxy", "clientApp": {"name": app},
-                "signature": chosen["signature"]},
-               token=s["sec_tok"])["value"]
-    return {"provider": "urban_vpn", "country": country, "host": host,
-            "port": port, "proxy": f"http://{tok}:1@{host}:{port}"}
-
 
 def _urban_vpn_all_servers(country: str) -> list[dict]:
     """Every server Urban VPN exposes for `country` (~14 each) — each with its
@@ -703,7 +672,7 @@ def verify_proxy(proxy_url: str, target: str = "https://api.ipify.org?format=jso
 
     if expect_country and out["exit_ip"]:
         try:
-            with TLSSession(None) as s:
+            with TLSSession(proxy_url) as s:
                 r = s.get(f"http://ip-api.com/json/{out['exit_ip']}", timeout=6.0)
                 cc = json.loads(r.text).get("countryCode")
             out["country"] = cc
@@ -1252,13 +1221,9 @@ def cmd_doctor(a: argparse.Namespace) -> int:
                        f"{vv['exit_ip']} = {vv['country']}" if vv["ok"] else (vv["error"] or "?")))
     except Exception as e:
         checks.append(("TLS probe via proxy", False, f"{type(e).__name__}: {e}"))
-    try:
-        with urllib.request.urlopen("https://api.ipify.org?format=json", timeout=6) as r:
-            checks.append(("direct egress", True, json.load(r)["ip"]))
-    except Exception as e:
-        checks.append(("direct egress", False, type(e).__name__))
-    checks.append(("enum: proxies.txt", Path(PROXY_FILE).exists(),
-                   PROXY_FILE if Path(PROXY_FILE).exists() else "create it for `forge enum`"))
+    has_proxy = Path(PROXY_FILE).exists() or (HERE / PROXY_FILE).exists()
+    checks.append(("enum: proxies.txt", has_proxy,
+                   PROXY_FILE if has_proxy else "create it for `forge enum`"))
     checks.append(("forge on PATH", shutil.which("forge") is not None,
                    shutil.which("forge") or "symlink ~/.local/bin/forge"))
     fails = 0
@@ -1296,21 +1261,25 @@ def cmd_run(a: argparse.Namespace) -> int:
         if vv["ok"]:
             print(f"      {ok('verified')}  TLS handshake + geo match ({vv['status']})")
         else:
-            print(bad(f"      FAILED: {vv['error']} — falling back to direct"))
-        proxy_url = px["proxy"] if vv["ok"] else ""
+            print(bad(f"      FAILED: {vv['error']} (direct fallback forbidden)"))
+            proxy_url = ""
     else:
-        print(warn("      no provider available — continuing DIRECT"))
+        print(bad("      no proxy provider available (direct IP forbidden)"))
+        proxy_url = ""
 
     print(bold("\n  [3/4] proxy ↔ target probe (TLS-fingerprinted)"))
     if target:
-        try:
-            with TLSSession(proxy_url or None) as s:
-                r = s.get(target)
-            via = "via proxy" if proxy_url else "direct"
-            m = ok(f"HTTP {r.status_code}") if r.status_code < 400 else bad(f"HTTP {r.status_code}")
-            print(f"      {m} {via} ({len(r.content)} bytes)")
-        except Exception as e:
-            print(bad(f"      unreachable: {type(e).__name__}: {e}"))
+        if not proxy_url:
+            print(bad("      probe aborted: valid proxy required (direct IP egress forbidden)"))
+        else:
+            try:
+                with TLSSession(proxy_url) as s:
+                    r = s.get(target)
+                via = "via proxy"
+                m = ok(f"HTTP {r.status_code}") if r.status_code < 400 else bad(f"HTTP {r.status_code}")
+                print(f"      {m} {via} ({len(r.content)} bytes)")
+            except Exception as e:
+                print(bad(f"      unreachable: {type(e).__name__}: {e}"))
     else:
         print(dim("      skipped (no target given)"))
 
