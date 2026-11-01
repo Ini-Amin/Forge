@@ -168,29 +168,42 @@ forge maturity --json
 
 `forge` is completely **target-agnostic**. It contains **zero hardcoded endpoints**. You supply your own application or gateway endpoint at runtime.
 
-### Dynamic Endpoint Supply
+### How to Set or Change Your Target URL (Beginner & Vibe Coder Friendly)
 
+You do **not** need to modify the Python code to test your own app or checkout endpoint. Here are the 3 easiest ways:
+
+#### Option 1: Just Run `forge` and Paste It (Interactive / Zero-Setup)
+Simply run `forge` in your terminal. The interactive wizard will ask you directly:
+```text
+  1. Target Region (US/GB/JP/ID/DE/BR) [US]: US
+  2. Target Endpoint URL (Enter = offline staging audit): https://your-website.com/api/checkout
+```
+👉 Just paste your local dev server (e.g., `http://localhost:3000/api/checkout`) or staging link and press Enter.
+
+#### Option 2: Pass It as a Flag (One-Liner)
+If you want to run it instantly in one command:
 ```bash
-# Option 1: Supply target via CLI flag
-forge run --target "https://staging.yourdomain.com/api/v1/checkout"
+# For local apps (Next.js, FastAPI, Express, Laravel):
+forge --target "http://localhost:3000/api/checkout"
 
-# Option 2: Set target via environment variable
-export FORGE_TARGET_URL="https://staging.yourdomain.com/api/v1/checkout"
-forge run
+# For live staging / cloud servers:
+forge --target "https://staging.yourstore.com/checkout"
 ```
 
-### Testing Local Mock Services (e.g., `stripe-mock`)
-
-For offline local development against mock containers:
-
+#### Option 3: Set an Environment Variable (For Projects & .env)
+If you are running automated test scripts or using a `.env` file:
 ```bash
-# Default targets http://127.0.0.1:12111
-forge test-mock
+# On Linux / macOS:
+export FORGE_TARGET_URL="http://localhost:3000/api/checkout"
+forge
 
-# Or specify your custom local server port
-forge test-mock --url "http://127.0.0.1:8000/api/health"
+# On Windows (PowerShell):
+$env:FORGE_TARGET_URL="http://localhost:3000/api/checkout"
+forge
 ```
 
+> 💡 **Where is it located in the code?**  
+> If you want to customize the internal code directly, the target resolver lives in **`forge/cli/main.py`** inside the `cmd_run` function. It automatically checks `a.target` first, then `os.environ.get("FORGE_TARGET_URL")`, and falls back to prompting you interactively.
 ---
 
 ## 🔒 Security & Privacy Notice
