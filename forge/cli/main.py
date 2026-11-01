@@ -24,7 +24,14 @@ from forge.identity.geo import COUNTRIES, COUNTRY_LABEL, GEO
 from forge.transport.profiles import PROFILES, build_headers, get_impersonate_profile
 from forge.transport.proxy import matching_proxy, verify_proxy
 from forge.transport.session import EgressSecurityError, TLSSession
-from forge.defenders.fraud_audit import FraudRiskAuditor
+from forge.defenders import (
+    BotTelemetryAuditor,
+    CurrencyPrecisionAuditor,
+    DefenseMaturityEvaluator,
+    FraudRiskAuditor,
+    RaceConditionAuditor,
+    TransactionFunnelSimulator,
+)
 from forge.payments.decline_codes import DeclineCodeTaxonomy
 from forge.payments.state_machine import PaymentStateMachine
 BANNER = r"""
@@ -205,6 +212,128 @@ def cmd_decline(a: argparse.Namespace) -> int:
     print(f"  Remediation       : {analysis.recommended_action}")
     print("─" * 52)
     return 0
+def cmd_funnel(a: argparse.Namespace) -> int:
+    country = a.country.upper() if a.country else "US"
+    fz = make_fullz(country)
+    card_meta = BIN_DB.get(a.bin, {"network": "Visa", "issuer": "Test", "country": country})
+    px = matching_proxy(fz)
+    exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
+    prof = get_impersonate_profile()
+    hdrs = build_headers(prof)
+    if a.idempotency:
+        hdrs["Idempotency-Key"] = "test_key_123"
+
+    res = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
+    if a.json:
+        data = {
+            "final_disposition": res.final_disposition,
+            "total_latency_ms": res.total_latency_ms,
+            "total_risk_score": res.total_risk_score,
+            "layers": [l.__dict__ for l in res.layers],
+            "vulnerabilities": res.vulnerabilities_detected,
+            "recommendations": res.recommendations,
+        }
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print(bold(f"\n forge transaction funnel simulator — {country}\n" + "─" * 56))
+    print(f"  Final Disposition : {bold(res.final_disposition)}")
+    print(f"  Total Latency     : {res.total_latency_ms:.1f} ms")
+    print(f"  Total Risk Score  : {res.total_risk_score}/100")
+    print(dim("─" * 56))
+    for l in res.layers:
+        v_icon = ok("✔") if l.verdict == "PASS" else (warn("!") if l.verdict == "FLAG" else bad("✘"))
+        print(f"  {v_icon} {l.layer_name:<20} [{l.verdict}] (+{l.score_penalty} pts, {l.latency_ms}ms)")
+        for d in l.details:
+            print(dim(f"      • {d}"))
+
+    if res.vulnerabilities_detected:
+        print(dim("─" * 56))
+        print(bad("  Vulnerabilities Identified:"))
+        for v in res.vulnerabilities_detected:
+            print(bad(f"    ✘ {v}"))
+    if res.recommendations:
+        print(dim("─" * 56))
+        print(ok("  Defense Recommendations:"))
+        for r in res.recommendations:
+            print(ok(f"    ✔ {r}"))
+    print("─" * 56)
+    return 0
+
+
+def cmd_currency(a: argparse.Namespace) -> int:
+    if a.edge_cases:
+        checks = CurrencyPrecisionAuditor.test_rounding_edge_cases(a.currency)
+        if a.json:
+            print(json.dumps([c.__dict__ for c in checks], indent=2))
+            return 0
+        print(bold(f"\n forge currency rounding edge cases — {a.currency}\n" + "─" * 56))
+        for c in checks:
+            h_icon = warn("!") if c.has_rounding_hazard else ok("✔")
+            print(f"  {h_icon} Input: {c.input_amount:<10} -> Smallest Units: {c.expected_integer_units:<8} (Hazard: {c.has_rounding_hazard})")
+        print("─" * 56)
+        return 0
+
+    chk = CurrencyPrecisionAuditor.audit_amount_to_units(a.currency, a.amount)
+    if a.json:
+        print(json.dumps(chk.__dict__, indent=2))
+        return 0
+
+    print(bold(f"\n forge currency precision audit — {chk.currency}\n" + "─" * 56))
+    print(f"  Input Amount      : {chk.input_amount}")
+    print(f"  Integer Units     : {chk.expected_integer_units}")
+    print(f"  Zero-Decimal      : {chk.is_zero_decimal}")
+    print(f"  Rounding Hazard   : {warn('YES') if chk.has_rounding_hazard else ok('NO')}")
+    print(f"  Recommendation    : {chk.recommendation}")
+    print("─" * 56)
+    return 0
+
+
+def cmd_maturity(a: argparse.Namespace) -> int:
+    matrix = DefenseMaturityEvaluator.calculate_confusion_matrix(tp=95, tn=980, fp=20, fn=5)
+    latencies = [15.2, 22.4, 45.1, 88.0, 112.5, 140.2, 210.0, 310.5, 450.0, 620.0]
+    lat = DefenseMaturityEvaluator.benchmark_latency(latencies)
+    sample_log = {
+        "transaction_id": "tx_staging_123",
+        "timestamp_utc": "2026-11-01T08:00:00Z",
+        "client_ip": "146.70.228.82",
+        "egress_asn": "AS9009",
+        "tls_ja4_fingerprint": "t13d1516h2_8daaf6152771_b0da82dd1658",
+        "avs_code": "Y",
+        "cvv_result": "match",
+        "iso_8583_response_code": "00",
+        "decision": "ALLOW",
+        "rule_id": "rule_default_allow",
+    }
+    audit = DefenseMaturityEvaluator.audit_trail_completeness(sample_log)
+
+    if a.json:
+        data = {
+            "confusion_matrix": matrix.__dict__,
+            "latency_percentiles": lat.__dict__,
+            "audit_trail_completeness": audit.__dict__,
+        }
+        print(json.dumps(data, indent=2))
+        return 0
+
+    print(bold("\n forge defense maturity scorecard\n" + "─" * 56))
+    print(bold("  [1] Precision & Tradeoff Metrics"))
+    print(f"      False Positive Rate : {matrix.false_positive_rate:.2%} (Conversion Loss Risk)")
+    print(f"      False Negative Rate : {matrix.false_negative_rate:.2%} (Fraud Exposure Risk)")
+    print(f"      F1-Score / Accuracy : {matrix.f1_score:.4f}")
+    print(dim(f"      Assessment          : {matrix.business_impact_summary}"))
+
+    print(bold("\n  [2] Detection Latency Percentiles"))
+    print(f"      p50 (Median)        : {lat.p50_ms} ms")
+    print(f"      p95 Percentile      : {lat.p95_ms} ms")
+    print(f"      p99 Percentile      : {lat.p99_ms} ms")
+    print(f"      Status              : {warn('Degraded (>500ms)') if lat.is_checkout_degraded else ok('Optimal')}")
+
+    print(bold("\n  [3] Forensic Audit Trail Index"))
+    print(f"      Completeness        : {audit.completeness_percentage}% ({audit.fields_present}/{audit.total_fields_required} fields)")
+    print(f"      Compliance Grade    : {ok(audit.compliance_grade)}")
+    print("─" * 56)
+    return 0
 
 def cmd_selftest(a: argparse.Namespace) -> int:
     for c in COUNTRIES:
@@ -273,6 +402,23 @@ def build_parser() -> argparse.ArgumentParser:
     p_dec = sub.add_parser("decline", help="Analyze gateway/issuer decline code and ISO 8583 mapping")
     p_dec.add_argument("code", help="Decline code (e.g. authentication_required, insufficient_funds, stolen_card)")
     p_dec.add_argument("--json", action="store_true")
+    # funnel
+    p_funnel = sub.add_parser("funnel", help="Simulate transaction traversal across 4 defensive layers")
+    p_funnel.add_argument("-c", "--country", choices=COUNTRIES, default="US")
+    p_funnel.add_argument("--bin", default="414720")
+    p_funnel.add_argument("--idempotency", action="store_true", help="Include Idempotency-Key header")
+    p_funnel.add_argument("--json", action="store_true")
+
+    # currency
+    p_curr = sub.add_parser("currency", help="Audit currency conversion, zero-decimal, and fractional precision")
+    p_curr.add_argument("--currency", default="USD")
+    p_curr.add_argument("--amount", type=float, default=10.00)
+    p_curr.add_argument("--edge-cases", action="store_true", help="Run common rounding edge cases")
+    p_curr.add_argument("--json", action="store_true")
+
+    # maturity
+    p_mat = sub.add_parser("maturity", help="Generate defensive maturity and latency scorecard")
+    p_mat.add_argument("--json", action="store_true")
     return p
 
 
@@ -302,6 +448,12 @@ def main() -> int:
             return cmd_audit_risk(args)
         elif args.cmd == "decline":
             return cmd_decline(args)
+        elif args.cmd == "funnel":
+            return cmd_funnel(args)
+        elif args.cmd == "currency":
+            return cmd_currency(args)
+        elif args.cmd == "maturity":
+            return cmd_maturity(args)
         else:
             parser.print_help()
             return 0

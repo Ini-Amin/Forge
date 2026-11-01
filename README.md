@@ -115,6 +115,55 @@ forge selftest
 
 ---
 
+## 🛡️ Defensive Simulation & Staging Audit Suite
+
+Forge equips defenders, fraud engineers, and backend architects to audit their transaction funnel and stress-test defenses **before** going live to production.
+
+### 1. 4-Layer Transaction Funnel Simulator (`forge funnel`)
+Simulate and trace a transaction through the entire defensive pipeline:
+```
+[Client / Bot]
+   ├── 1. Edge / WAF        (IP reputation, ASN type, TLS ClientHello consistency)
+   ├── 2. Merchant Backend  (Schema completeness, Idempotency-Key enforcement)
+   ├── 3. Gateway / Radar   (AVS match, Geo-IP to billing country alignment)
+   └── 4. Card Issuer / 3DS (EMVCo 3DS decision: Frictionless vs Challenge SCA)
+```
+
+```bash
+# Simulate funnel traversal for US transaction fixture
+forge funnel --country US
+
+# Include Idempotency-Key header to test backend validation
+forge funnel --country US --idempotency
+
+# JSON export for CI/CD staging verification
+forge funnel --country JP --json
+```
+
+### 2. Currency Truncation & Precision Auditor (`forge currency`)
+Audit currency conversions against ISO 4217 zero-decimal (JPY, KRW, VND), three-decimal (KWD, BHD), and fractional cent rounding hazards:
+
+```bash
+# Audit zero-decimal conversion (e.g. JPY smallest unit is 1, not 100)
+forge currency --currency JPY --amount 1500
+
+# Audit rounding edge cases ($10.555 fractional cent hazards)
+forge currency --currency USD --edge-cases
+```
+
+### 3. Defense Maturity Scorecard (`forge maturity`)
+Evaluate quantitative defense metrics against production standards:
+* **Precision Tradeoffs:** False Positive Rate (FPR) vs. False Negative Rate (FNR).
+* **Latency Percentiles:** p50, p95, and p99 checkout latency impact.
+* **Forensic Audit Trail Index:** Verifies presence of mandatory forensic fields (JA4 hash, AVS, ISO 8583 response code).
+
+```bash
+forge maturity
+forge maturity --json
+```
+
+---
+
 ## 🚀 Integration Testing (Staging & Production)
 
 `forge` is completely **target-agnostic**. It contains **zero hardcoded endpoints**. You supply your own application or gateway endpoint at runtime.
