@@ -46,9 +46,19 @@ COUNTRY_DEFAULT_BIN: dict[str, str] = {
 }
 
 
-def get_default_bin_for_country(country: str) -> str:
-    """Return a geo-coherent default BIN matching the target country."""
-    return COUNTRY_DEFAULT_BIN.get(country.upper(), "414720")
+def get_default_bin_for_country(country: str) -> Optional[str]:
+    """Return the default BIN for a country, or None if forge has no BIN there.
+
+    Returning a US BIN for an unrecognised country would hand the caller a
+    Chase card labelled US/USD while they asked for somewhere else — a fixture
+    that looks coherent and is not. Absence is reported as absence.
+    """
+    return COUNTRY_DEFAULT_BIN.get(country.upper())
+
+
+def supported_countries() -> list[str]:
+    """Countries forge can produce a geo-coherent card for."""
+    return sorted(COUNTRY_DEFAULT_BIN)
 
 
 def bins_by(network: Optional[str] = None, country: Optional[str] = None) -> dict[str, dict[str, Any]]:
@@ -62,10 +72,37 @@ def bins_by(network: Optional[str] = None, country: Optional[str] = None) -> dic
     }
 
 
+def infer_network(pan: str) -> Optional[str]:
+    """Derive the card network from the IIN ranges defined in ISO/IEC 7812.
+
+    A prefix missing from BIN_DB still carries its network: '4' is Visa whoever
+    issues it. That is real information and dropping it to Unknown would make
+    an unlisted BIN look indistinguishable from an unparseable string.
+    """
+    if not pan or not pan.isdigit() or len(pan) < 4:
+        return None
+    n2 = int(pan[:2])
+    n3 = int(pan[:3])
+    n4 = int(pan[:4])
+    if pan[0] == "4":
+        return "Visa"
+    if n2 in (34, 37):
+        return "American Express"
+    if n2 in (30, 36, 38):
+        return "Diners Club"
+    if n2 == 35:
+        return "JCB"
+    if pan[:4] == "6011" or n2 == 65 or 644 <= n3 <= 649:
+        return "Discover"
+    if 51 <= n2 <= 55 or 2221 <= n4 <= 2720:
+        return "Mastercard"
+    return None
+
+
 def card_length(bin_: str) -> int:
     """Determine standard card PAN length by prefix."""
     meta = issuer_lookup(bin_)
-    if meta["bin"] != "Unknown":
+    if meta["bin_known"]:
         return meta["pan_length"]
     if bin_.startswith(("34", "37")):
         return 15  # Amex
@@ -74,16 +111,36 @@ def card_length(bin_: str) -> int:
     return 16      # Standard Visa/MC/Discover/JCB
 
 
-_UNKNOWN_META: dict[str, Any] = {
-    "bin": "Unknown", "network": "Unknown", "issuer": "Unknown", "country": "??",
-    "currency": "?", "pan_length": 16, "bin_length": 6, "funding": "unknown", "is_prepaid": False,
-}
-
-
 def issuer_lookup(bin_or_pan: str) -> dict[str, Any]:
-    """Look up issuer metadata by BIN prefix (evaluates 8, 6, and 4 digits)."""
+    """Look up issuer metadata by BIN prefix (evaluates 8, 6, and 4 digits).
+
+    `bin_known` says whether the prefix is in the database. When it is not, the
+    network is still inferred from IIN ranges, but issuer, country and currency
+    stay empty because nothing truthful can be said about them.
+    """
     for prefix_len in (8, 6, 4):
         prefix = bin_or_pan[:prefix_len]
         if prefix in BIN_DB:
-            return {"bin": prefix, **BIN_DB[prefix]}
-    return dict(_UNKNOWN_META)
+            return {"bin": prefix, "bin_known": True, **BIN_DB[prefix]}
+    return {
+        "bin": "Unknown",
+        "bin_known": False,
+        "network": infer_network(bin_or_pan) or "Unknown",
+        "issuer": "Unknown",
+        "country": "??",
+        "currency": "?",
+        "pan_length": card_length_for_network(infer_network(bin_or_pan)),
+        "bin_length": 6,
+        "funding": "unknown",
+        "is_prepaid": False,
+    }
+
+
+def card_length_for_network(network: Optional[str]) -> int:
+    """PAN length implied by the network when no issuer record exists."""
+    if network == "American Express":
+        return 15
+    if network == "Diners Club":
+        return 14
+    return 16
+

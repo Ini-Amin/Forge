@@ -122,10 +122,18 @@ forge issuer lookup 378282 --json
 forge issuer default BR
 ```
 
+`forge issuer lookup` reports `bin_known`. When a prefix is absent from the
+database it still resolves the network from IIN ranges (`4` is Visa whoever
+issues it) but leaves issuer, country and currency empty — it does not guess.
+
 ### 4. Luhn ISO/IEC 7812 Card Fixtures (`forge bin`)
 Generate Luhn-compliant test card fixtures for QA and validator testing. `--country` now
 auto-picks a geo-coherent BIN for that country (Mandiri for ID, Banco do Brasil for BR,
 Barclays for GB, etc.) so identities and cards match without manual BIN lookup.
+
+Generation is fail-closed. A country with no BIN on file and a prefix absent from the
+issuer database are both errors rather than silent fallbacks, because a fixture
+carrying another country's issuer is a wrong answer that looks correct.
 
 ```bash
 # Generate 5 test fixtures for Chase Visa BIN (414720) in pipe format (PAN|MM|YY|CVV)
@@ -140,6 +148,10 @@ forge bin --country BR --count 5 --json
 
 # Override the auto-picked BIN explicitly
 forge bin --country BR --bin 521114 --count 3  # BCA Mastercard instead of Banco do Brasil
+
+# Unlisted prefix: refused, because country and currency would be fiction.
+# Pass --allow-unknown-bin to generate anyway; network is still inferred from IIN ranges.
+forge bin --bin 412290 --count 1 --allow-unknown-bin --json
 ```
 
 ### 5. System Diagnostics & Self-Test (`forge doctor` & `forge selftest`)

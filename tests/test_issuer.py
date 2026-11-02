@@ -12,10 +12,14 @@ from forge.identity import make_fullz
 
 
 def test_get_default_bin_for_country():
-    """Each supported country maps to its default BIN."""
+    """Each supported country maps to its default BIN; anything else is None.
+
+    Returning a US BIN for an unknown country was how `forge bin --country FR`
+    silently produced a Chase/USD card: coherent-looking, wrong country.
+    """
     for c in COUNTRY_DEFAULT_BIN:
         assert get_default_bin_for_country(c) == COUNTRY_DEFAULT_BIN[c]
-    assert get_default_bin_for_country("XX") == "414720"  # fallback
+    assert get_default_bin_for_country("XX") is None
 
 
 def test_cmd_issuer_list_all(monkeypatch):
@@ -245,4 +249,76 @@ def test_maturity_scores_supplied_counts():
     assert abs(cm["false_positive_rate"] - 0.02) < 1e-9
     assert data["latency_percentiles"]["sample_count"] == 5
     assert data["audit_trail_completeness"] is None
+
+
+def test_unknown_country_is_refused():
+    """No silent US substitution: a country without a BIN is an error, not a guess."""
+    r = subprocess.run([sys.executable, "forge.py", "bin", "--country", "FR"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "No BIN on file for FR" in r.stdout
+    assert "414720" not in r.stdout
+
+
+def test_unknown_bin_is_refused_by_default():
+    r = subprocess.run([sys.executable, "forge.py", "bin", "--bin", "412290", "--count", "1"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "not in the issuer database" in r.stdout
+
+
+def test_unknown_bin_generates_only_with_explicit_flag():
+    """--allow-unknown-bin is the escape hatch, and it keeps the metadata honest."""
+    r = subprocess.run([sys.executable, "forge.py", "bin", "--bin", "412290",
+                        "--count", "1", "--allow-unknown-bin", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    card = json.loads(r.stdout)[0]
+    assert card["issuer"] == "Unknown"
+    assert card["network"] == "Visa"  # IIN range is still real information
+    assert card["pan"].startswith("412290")
+
+
+def test_infer_network_uses_real_iin_ranges():
+    from forge.cards.bins import infer_network
+    assert infer_network("4122906140104798") == "Visa"
+    assert infer_network("378282246310005") == "American Express"
+    assert infer_network("6011000990139424") == "Discover"
+    assert infer_network("5555555555554444") == "Mastercard"
+    assert infer_network("2221000000000009") == "Mastercard"
+    assert infer_network("3566002020360505") == "JCB"
+    assert infer_network("3056930009020004") == "Diners Club"
+    assert infer_network("9999000000000000") is None
+    assert infer_network("abcd") is None
+
+
+def test_unknown_bin_reports_what_it_does_not_know():
+    meta = issuer_lookup("4122906140104798")
+    assert meta["bin_known"] is False
+    assert meta["network"] == "Visa"
+    assert meta["issuer"] == "Unknown"
+    assert meta["country"] == "??"
+    assert meta["currency"] == "?"
+
+
+def test_lookup_partial_prefix_succeeds_with_unknowns():
+    """An unlisted prefix still answers with its IIN range, so it is not a failure.
+
+    Exit 1 is reserved for input that says nothing at all in either direction.
+    """
+    r = subprocess.run([sys.executable, "forge.py", "issuer", "lookup",
+                        "4122906140104798", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    meta = json.loads(r.stdout)
+    assert meta["bin_known"] is False
+    assert meta["network"] == "Visa"
+    assert meta["country"] == "??"
+
+
+def test_lookup_unparseable_prefix_fails():
+    r = subprocess.run([sys.executable, "forge.py", "issuer", "lookup", "999999"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "Unknown" in r.stdout
 

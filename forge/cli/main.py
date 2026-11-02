@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from forge.cards.bins import BIN_DB, bins_by, get_default_bin_for_country, issuer_lookup
+from forge.cards.bins import (
+    BIN_DB,
+    bins_by,
+    get_default_bin_for_country,
+    issuer_lookup,
+    supported_countries,
+)
 from forge.cards.luhn import format_card, generate_random, is_luhn_valid
 from forge.cards.storage import storage
 from forge.cli.doctor import bad, bold, dim, ok, run_doctor, warn
@@ -91,6 +97,10 @@ def cmd_id(a: argparse.Namespace) -> int:
     fz = make_fullz(country, seed=a.seed)
     if a.card:
         default_bin = get_default_bin_for_country(country)
+        if default_bin is None:
+            print(bad(f"No BIN on file for {country}; refusing to attach another country's card."))
+            print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
+            return 1
         meta = issuer_lookup(default_bin)
         fz["card_bin"] = default_bin
         fz["card_network"] = meta["network"]
@@ -125,13 +135,26 @@ def cmd_fp(a: argparse.Namespace) -> int:
 
 
 def cmd_bin(a: argparse.Namespace) -> int:
-    if a.country:
-        bin_ = a.bin or get_default_bin_for_country(a.country.upper())
-        if issuer_lookup(bin_).get("bin") == "Unknown":
-            print(bad(f"\n No BIN for country {a.country} (use `forge issuer list --country {a.country}`)"))
+    """Generate card fixtures. Refuses to guess when the prefix or country is
+    unknown, because a fixture carrying another country's issuer is not a
+    fixture, it is a wrong answer that looks right."""
+    if a.bin:
+        bin_ = a.bin
+        if not issuer_lookup(bin_)["bin_known"] and not getattr(a, "allow_unknown_bin", False):
+            print(bad(f"BIN {bin_} is not in the issuer database; country and currency are unknown."))
+            print(dim("A card that cannot be tied to an issuer breaks geo-coherence silently."))
+            print(dim("Use `forge issuer list` to pick a known prefix, or pass --allow-unknown-bin "
+                      "to generate anyway with issuer metadata marked unavailable."))
+            return 1
+    elif a.country:
+        bin_ = get_default_bin_for_country(a.country.upper())
+        if bin_ is None:
+            print(bad(f"No BIN on file for {a.country.upper()}; refusing to substitute another country's card."))
+            print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
             return 1
     else:
-        bin_ = a.bin or "414720"
+        bin_ = get_default_bin_for_country("US")
+
     cards = generate_random(bin_, a.month, a.year, a.count, card_storage=storage, seed=a.seed)
     if a.json:
         print(json.dumps(cards, indent=2))
@@ -166,7 +189,7 @@ def cmd_issuer(a: argparse.Namespace) -> int:
         return 0
     if a.subcommand == "lookup":
         meta = issuer_lookup(a.query)
-        if meta["bin"] == "Unknown":
+        if not meta["bin_known"] and meta["network"] == "Unknown":
             print(f"Unknown BIN/pan prefix: {a.query}")
             return 1
         if a.json:
@@ -177,6 +200,7 @@ def cmd_issuer(a: argparse.Namespace) -> int:
             print(f"  {key:<12}: {meta[key]}")
         print(f"  pan_length   : {meta['pan_length']}")
         print(f"  bin_length   : {meta['bin_length']}")
+        print(f"  bin_known    : {meta['bin_known']}")
         print(f"  is_prepaid   : {meta.get('is_prepaid', False)}")
         print("─" * 56)
         return 0
@@ -560,6 +584,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_bin = sub.add_parser("bin", help="Generate Luhn test cards")
     p_bin.add_argument("--country", default=None, help="Auto-pick a geo-coherent BIN for this country")
     p_bin.add_argument("--bin", default=None, help="Explicit BIN/PAN prefix (default: geo-coherent for country, or 414720)")
+    p_bin.add_argument("--allow-unknown-bin", action="store_true",
+                       help="Generate for a prefix absent from the issuer DB (issuer metadata will be unknown)")
     p_bin.add_argument("-n", "--count", type=int, default=5)
     p_bin.add_argument("-m", "--month", default="12")
     p_bin.add_argument("-y", "--year", default="30")
