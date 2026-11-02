@@ -40,6 +40,14 @@ COUNTRY_CURRENCY = {
     "ID": "IDR",
     "DE": "EUR",
     "BR": "BRL",
+    "CA": "CAD",
+    "FR": "EUR",
+    "IT": "EUR",
+    "ES": "EUR",
+    "AU": "AUD",
+    "SG": "SGD",
+    "NL": "EUR",
+    "SE": "SEK",
 }
 from forge.transport.proxy import matching_proxy, verify_proxy
 from forge.transport.session import EgressSecurityError, TLSSession
@@ -129,8 +137,13 @@ def _resolve_bin_or_fail(a: argparse.Namespace, country: Optional[str]) -> Optio
     cc = (country or "US").upper()
     default_bin = get_default_bin_for_country(cc)
     if default_bin is None:
-        print(bad(f"No BIN on file for {cc}; refusing to substitute another country's card."))
-        print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
+        db_has = {m["country"].upper() for m in BIN_DB.values()}
+        if cc.upper() in db_has:
+            print(bad(f"No default BIN for {cc} — the identity pipeline does not cover it yet."))
+            print(dim("Use `forge issuer list --country " + cc + "` and pass --bin explicitly."))
+        else:
+            print(bad(f"No BIN on file for {cc}; refusing to substitute another country's card."))
+            print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
         return None
     return default_bin
 
@@ -257,7 +270,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     tty = sys.stdin.isatty()
 
     # 1. Inputs: Region, Target URL, Card Count
-    country = getattr(a, "country", None) or (_ask("1. Target Region (US/GB/JP/ID/DE/BR)", "US").upper() if tty else "US")
+    country = getattr(a, "country", None) or (_ask("1. Target Region (US/GB/JP/ID/DE/BR/CA/FR/IT/ES/AU/SG/NL/SE)", "US").upper() if tty else "US")
     if country not in COUNTRIES:
         country = "US"
 

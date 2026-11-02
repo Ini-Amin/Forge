@@ -40,7 +40,7 @@ class TestLuhnCards(unittest.TestCase):
     def test_issuer_lookup(self):
         meta_visa = issuer_lookup("4147201234567890")
         self.assertEqual(meta_visa["network"], "Visa")
-        self.assertEqual(meta_visa["issuer"], "Chase")
+        self.assertEqual(meta_visa["issuer"], "JPMorgan Chase")
 
         meta_mc = issuer_lookup("5178051234567890")
         self.assertEqual(meta_mc["network"], "Mastercard")

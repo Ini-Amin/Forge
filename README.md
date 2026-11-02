@@ -78,6 +78,9 @@ geo-coherent out of the box.
 forge id --country US
 forge id --country JP
 forge id --country ID
+forge id --country CA   # SIN (Luhn)
+forge id --country FR   # INSEE/NIR (mod-97)
+forge id --country SE   # personnummer (Luhn)
 
 # JSON output for automated scripting
 forge id --country US --json
@@ -89,6 +92,12 @@ forge id --country BR --card --json
 # Deterministic generation using a seed
 forge id --country US --seed 42 --json
 ```
+
+Every national ID is generated to its real format and carries a verifiable
+checksum: US SSN, ID NIK, JP My Number, BR CPF, DE steuer-ID, UK NINO plus CA
+SIN, FR NIR, IT Codice Fiscale, ES NIE, AU TFN, SG NRIC, NL BSN, and SE
+personnummer. `tests/test_identity.py` re-implements each national check
+independently, so a generator that drifts from the algorithm fails the suite.
 
 ### 2. Browser Fingerprint Profiles (`forge fp`)
 Inspect browser TLS ClientHello configurations and matched HTTP headers:
@@ -102,6 +111,15 @@ forge fp --json
 Query the BIN database: list issuers, filter by country/network/issuer, and resolve a BIN
 or PAN prefix to its issuer, currency, and card length.
 
+The database ships 30+ source-verified issuer prefixes across 14 countries.
+Every record carries a `source` field naming the reference it was checked
+against — `binlist` (binlist.net data repo, CC-BY 4.0) or `test-panel`
+(publicly documented test-card ranges). `forge doctor` runs an integrity
+validator over the whole table: it rejects placeholder issuers, countries that
+aren't ISO alpha-2, network labels that contradict the IIN range, and prefixes
+that cannot form a Luhn-valid PAN. A prefix with no verified issuer is not
+shipped at all.
+
 ```bash
 # List all issuers
 forge issuer list
@@ -114,7 +132,7 @@ forge issuer list --country US --json
 forge issuer list --network Mastercard --issuer central
 
 # Resolve a BIN or full PAN to issuer metadata
-forge issuer lookup 521114
+forge issuer lookup 455632
 forge issuer lookup 4147201111111111
 forge issuer lookup 378282 --json
 
@@ -127,16 +145,21 @@ database it still resolves the network from IIN ranges (`4` is Visa whoever
 issues it) but leaves issuer, country and currency empty — it does not guess.
 
 ### 4. Luhn ISO/IEC 7812 Card Fixtures (`forge bin`)
-Generate Luhn-compliant test card fixtures for QA and validator testing. `--country` now
-auto-picks a geo-coherent BIN for that country (Mandiri for ID, Banco do Brasil for BR,
-Barclays for GB, etc.) so identities and cards match without manual BIN lookup.
+Generate Luhn-compliant test card fixtures for QA and validator testing. `--country`
+auto-picks a geo-coherent BIN for that country (Mandiri for ID, Itau Unibanco for BR,
+NatWest for GB, RBC for CA, BNP Paribas for FR, ...) so identities and cards match
+without manual BIN lookup. A default BIN exists only where the identity pipeline can
+generate a coherent buyer for that country — all 14 shipped countries have one; BIN
+data for CH and MX is queryable via `forge issuer list --country CH` but there is no
+identity profile, so `--country CH` refuses rather than attach a European card to a
+Swiss identity.
 
 Generation is fail-closed. A country with no BIN on file and a prefix absent from the
 issuer database are both errors rather than silent fallbacks, because a fixture
 carrying another country's issuer is a wrong answer that looks correct.
 
 ```bash
-# Generate 5 test fixtures for Chase Visa BIN (414720) in pipe format (PAN|MM|YY|CVV)
+# Generate 5 test fixtures for JPMorgan Chase Visa BIN (414720) in pipe format (PAN|MM|YY|CVV)
 forge bin --bin 414720 --count 5 --format pipe
 
 # Generate structured JSON fixtures
@@ -147,7 +170,7 @@ forge bin --country ID --count 5
 forge bin --country BR --count 5 --json
 
 # Override the auto-picked BIN explicitly
-forge bin --country BR --bin 521114 --count 3  # BCA Mastercard instead of Banco do Brasil
+forge bin --country ID --bin 455632 --count 3  # BCA Visa instead of Mandiri
 
 # Unlisted prefix: refused, because country and currency would be fiction.
 # Pass --allow-unknown-bin to generate anyway; network is still inferred from IIN ranges.
@@ -247,7 +270,7 @@ You do **not** need to modify the Python code to test your own app or checkout e
 #### Option 1: Just Run `forge` and Paste It (Interactive / Zero-Setup)
 Simply run `forge` in your terminal. The interactive wizard will ask you directly:
 ```text
-  1. Target Region (US/GB/JP/ID/DE/BR) [US]: US
+  1. Target Region (US/GB/JP/ID/DE/BR/CA/FR/IT/ES/AU/SG/NL/SE) [US]: US
   2. Target Endpoint URL (Enter = offline staging audit): https://your-website.com/api/checkout
 ```
 👉 Just paste your local dev server (e.g., `http://localhost:3000/api/checkout`) or staging link and press Enter.

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, List, Tuple
 
+from forge.cards.bins import BIN_DB, validate_bin_db
 from forge.cards.storage import storage
 from forge.config import DEFAULT_PROXIES_FILE
 from forge.transport.proxy import matching_proxy, urban_vpn_single, verify_proxy
@@ -49,6 +50,14 @@ def run_doctor(json_output: bool = False) -> int:
         checks.append(("sqlite wal storage", True, f"{storage.db_path} ({count} records)"))
     except Exception as e:
         checks.append(("sqlite wal storage", False, f"error: {e}"))
+
+    # 3b. BIN database integrity (offline: fabrications are structural, not live)
+    bin_errors = validate_bin_db()
+    checks.append((
+        "BIN database integrity",
+        not bin_errors,
+        f"{len(BIN_DB)} prefixes clean" if not bin_errors else f"{len(bin_errors)} violation(s): {bin_errors[0]}",
+    ))
 
     # 4. Urban VPN Provider
     try:

@@ -69,13 +69,13 @@ def test_cmd_issuer_list_filtered():
     for r in rows:
         assert r["country"] == "ID"
     assert any(r["bin"] == "461700" for r in rows)  # Mandiri
-    assert any(r["bin"] == "521114" for r in rows)  # BCA
+    assert any(r["bin"] == "455632" for r in rows)  # BCA
 
 
 def test_cmd_issuer_lookup():
     """forge issuer lookup resolves by longest prefix."""
     from forge.cli.main import cmd_issuer
-    a = argparse.Namespace(subcommand="lookup", query="521114", json=True)
+    a = argparse.Namespace(subcommand="lookup", query="455632", json=True)
     out = io.StringIO()
     sys.stdout = out
     try:
@@ -84,7 +84,7 @@ def test_cmd_issuer_lookup():
     finally:
         sys.stdout = sys.__stdout__
     assert meta["issuer"] == "Bank Central Asia"
-    assert meta["network"] == "Mastercard"
+    assert meta["network"] == "Visa"
 
 
 def test_cmd_issuer_lookup_unknown():
@@ -108,8 +108,8 @@ def test_cmd_issuer_default():
     finally:
         sys.stdout = sys.__stdout__
     text = out.getvalue()
-    assert "Banco do Brasil" in text
-    assert "400403" in text
+    assert "Itau Unibanco" in text
+    assert "544828" in text
 
 
 def test_cmd_issuer_default_json():
@@ -122,8 +122,8 @@ def test_cmd_issuer_default_json():
         meta = json.loads(out.getvalue())
     finally:
         sys.stdout = sys.__stdout__
-    assert meta["bin"] == "400403"
-    assert meta["issuer"] == "Banco do Brasil"
+    assert meta["bin"] == "544828"
+    assert meta["issuer"] == "Itau Unibanco"
 
 
 def test_cmd_bin_geo_coherent_default(isolated_storage):
@@ -180,11 +180,12 @@ def test_subprocess_issuer_list():
                        capture_output=True, text=True, cwd=".")
     assert r.returncode == 0, r.stderr
     assert "Chase" in r.stdout
-    assert "HSBC UK" in r.stdout
+    assert "Navy Federal" in r.stdout
+    assert "NatWest" in r.stdout
 
 
 def test_subprocess_issuer_lookup():
-    r = subprocess.run([sys.executable, "forge.py", "issuer", "lookup", "521114"],
+    r = subprocess.run([sys.executable, "forge.py", "issuer", "lookup", "455632"],
                        capture_output=True, text=True)
     assert r.returncode == 0
     assert "Bank Central Asia" in r.stdout
@@ -194,7 +195,7 @@ def test_subprocess_bin_country():
     r = subprocess.run([sys.executable, "forge.py", "bin", "--country", "BR",
                         "--count", "3"], capture_output=True, text=True)
     assert r.returncode == 0
-    assert "400403" in r.stdout
+    assert "544828" in r.stdout
 
 
 def test_subprocess_issuer_default_plain():
@@ -212,8 +213,8 @@ def test_subprocess_issuer_default_json():
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     meta = json.loads(r.stdout)
-    assert meta["bin"] == "400403"
-    assert meta["issuer"] == "Banco do Brasil"
+    assert meta["bin"] == "544828"
+    assert meta["issuer"] == "Itau Unibanco"
 
 
 def test_public_test_pans_are_not_issuers():
@@ -229,6 +230,59 @@ def test_public_test_pans_are_not_issuers():
         assert meta["issuer"] == "Unknown", pan
     assert "424242" not in BIN_DB
     assert "411111" not in BIN_DB
+
+
+def test_bin_db_passes_validator():
+    """Every BIN must be structurally sound and carry provenance.
+
+    A prefix that cannot (a) form a Luhn-valid PAN, (b) state a real issuer
+    rather than a placeholder, or (c) cite where its claim came from is a
+    fabrication waiting to happen — the validator refuses it.
+    """
+    from forge.cards.bins import validate_bin_db
+    assert validate_bin_db() == []
+
+
+def test_bin_db_validator_rejects_fabricated_entry(monkeypatch):
+    from forge.cards.bins import BIN_DB, validate_bin_db
+    monkeypatch.setitem(BIN_DB, "111111", {
+        "network": "Visa", "issuer": "Test Bank", "country": "US",
+        "currency": "USD", "pan_length": 16, "bin_length": 6,
+        "funding": "credit", "is_prepaid": False, "source": "",
+    })
+    errs = validate_bin_db()
+    assert any("BIN 111111" in e and "placeholder" in e for e in errs)
+    assert any("source" in e for e in errs)
+
+
+def test_bin_db_validator_rejects_network_contradiction(monkeypatch):
+    """A 'Visa' label on a Mastercard IIN range is a misattribution, not data."""
+    from forge.cards.bins import BIN_DB, validate_bin_db
+    monkeypatch.setitem(BIN_DB, "523456", {
+        "network": "Visa", "issuer": "Some Bank", "country": "US",
+        "currency": "USD", "pan_length": 16, "bin_length": 6,
+        "funding": "credit", "is_prepaid": False, "source": "binlist",
+    })
+    errs = validate_bin_db()
+    assert any("BIN 523456" in e and "contradicts IIN" in e for e in errs)
+
+
+def test_bin_db_grows_beyond_fifteen_issuers():
+    """The expansion goal: more real, source-verified issuers than the old 15."""
+    assert len(BIN_DB) >= 30
+    assert len(COUNTRY_DEFAULT_BIN) >= 10
+    assert any(m["country"] == "CA" for m in BIN_DB.values())
+    assert any(m["country"] == "SG" for m in BIN_DB.values())
+
+
+def test_bin_db_failed_attribution_fixed():
+    """400022 was shipped as 'HSBC UK prepaid'; binlist says Navy Federal US.
+    A card that looks British but is issued in the US is a lie that AVS
+    scoring would trust. It must now resolve to the verified issuer."""
+    meta = issuer_lookup("400022")
+    assert meta["issuer"] == "Navy Federal Credit Union"
+    assert meta["country"] == "US"
+    assert meta["currency"] == "USD"
 
 
 def test_no_mock_harness_command():
@@ -268,12 +322,22 @@ def test_maturity_scores_supplied_counts():
 
 
 def test_unknown_country_is_refused():
-    """No silent US substitution: a country without a BIN is an error, not a guess."""
-    r = subprocess.run([sys.executable, "forge.py", "bin", "--country", "FR"],
+    """No silent US substitution: a country with no BIN at all is an error, not a guess."""
+    r = subprocess.run([sys.executable, "forge.py", "bin", "--country", "VE"],
                        capture_output=True, text=True)
     assert r.returncode == 1
-    assert "No BIN on file for FR" in r.stdout
+    assert "No BIN on file for VE" in r.stdout
     assert "414720" not in r.stdout
+
+
+def test_bin_country_with_data_but_no_identity_points_to_explicit_flag():
+    """CH/MX have verified BINs but no identity profile; `--country CH` must not
+    silently re-point elsewhere — it tells you to use --bin explicitly."""
+    r = subprocess.run([sys.executable, "forge.py", "bin", "--country", "CH"],
+                       capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "No default BIN for CH" in r.stdout
+    assert "--bin explicitly" in r.stdout
 
 
 def test_unknown_bin_is_refused_by_default():

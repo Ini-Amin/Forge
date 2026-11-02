@@ -18,11 +18,19 @@ from forge.identity.geo import (
     COUNTRIES,
     GEO,
     NAMES,
+    au_tfn,
     br_cpf,
+    ca_sin,
     de_steuer,
+    es_nie,
     format_phone,
+    fr_nir,
     id_nik,
+    it_cf,
     jp_my_number,
+    nl_bsn,
+    se_personnummer,
+    sg_nric,
     uk_nino,
     us_ssn,
 )
@@ -132,19 +140,38 @@ def make_fullz(country: str = "US", seed: Optional[int] = None) -> dict[str, Any
     email = f"{first.lower()}.{last.lower()}{rnd.randint(10, 99)}@{email_domain}"
     phone = format_phone(g["phone_fmt"], geo_data["area"], rnd=rnd)
 
-    # DOB first so NIK's DDMMYY is derived from it (single draw, no dead retry).
+    # DOB first so date-encoding IDs (NIK, NIR, Codice Fiscale, personnummer)
+    # derive their digits from it (single draw, no dead retry).
     dob = generate_dob(seed=seed)
+    female = rnd.random() < 0.5
     id_name = g.get("id_name", "national_id")
     if id_name == "ssn":
         nat_id = us_ssn(geo_data["state"], rnd=rnd)
     elif id_name == "nik":
-        nat_id = id_nik(zip_code, rnd=rnd, dob=dob, female=rnd.random() < 0.5)
+        nat_id = id_nik(zip_code, rnd=rnd, dob=dob, female=female)
     elif id_name == "my_number":
         nat_id = jp_my_number(rnd=rnd)
     elif id_name == "cpf":
         nat_id = br_cpf(rnd=rnd)
     elif id_name == "nino":
         nat_id = uk_nino(rnd=rnd)
+    elif id_name == "sin":
+        nat_id = ca_sin(rnd=rnd)
+    elif id_name == "nir":
+        nat_id = fr_nir(zip_code, dob=dob, female=female, rnd=rnd)
+    elif id_name == "codice_fiscale":
+        nat_id = it_cf(last, first, dob=dob, female=female,
+                       cf_code=geo_data.get("cf_code") or "H501", rnd=rnd)
+    elif id_name == "nie":
+        nat_id = es_nie(rnd=rnd)
+    elif id_name == "tfn":
+        nat_id = au_tfn(rnd=rnd)
+    elif id_name == "nric":
+        nat_id = sg_nric(rnd=rnd)
+    elif id_name == "bsn":
+        nat_id = nl_bsn(rnd=rnd)
+    elif id_name == "personnummer":
+        nat_id = se_personnummer(dob=dob, rnd=rnd)
     else:
         nat_id = de_steuer(rnd=rnd)
 

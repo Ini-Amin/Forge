@@ -10,7 +10,7 @@ from __future__ import annotations
 import random
 from typing import Dict, Tuple
 
-COUNTRIES = ["US", "GB", "JP", "ID", "DE", "BR"]
+COUNTRIES = ["US", "GB", "JP", "ID", "DE", "BR", "CA", "FR", "IT", "ES", "AU", "SG", "NL", "SE"]
 
 COUNTRY_LABEL = {
     "US": "United States",
@@ -19,6 +19,14 @@ COUNTRY_LABEL = {
     "ID": "Indonesia",
     "DE": "Germany",
     "BR": "Brazil",
+    "CA": "Canada",
+    "FR": "France",
+    "IT": "Italy",
+    "ES": "Spain",
+    "AU": "Australia",
+    "SG": "Singapore",
+    "NL": "Netherlands",
+    "SE": "Sweden",
 }
 
 GEO: dict[str, dict] = {
@@ -102,6 +110,110 @@ GEO: dict[str, dict] = {
                           "streets": ["Av. Rio Branco", "Rua Primeiro de Marco", "Rua Uruguaiana"]},
         },
     },
+    "CA": {
+        "phone_fmt": "+1 (aaa) nnn-nnnn",
+        "id_name": "sin",
+        "cities": {
+            "M5V 2T6": {"city": "Toronto", "state": "ON", "area": "416",
+                        "streets": ["King St W", "Queen St W", "Yonge St", "Bay St"]},
+            "V6B 1A1": {"city": "Vancouver", "state": "BC", "area": "604",
+                        "streets": ["Granville St", "Robson St", "Main St", "W Georgia St"]},
+            "H3A 1B1": {"city": "Montreal", "state": "QC", "area": "514",
+                        "streets": ["Rue Sainte-Catherine", "Rue Sherbrooke", "Rue St-Denis", "Ave McGill College"]},
+            "K1A 0A9": {"city": "Ottawa", "state": "ON", "area": "613",
+                        "streets": ["Elgin St", "Rideau St", "Bank St", "Wellington St"]},
+        },
+    },
+    "FR": {
+        "phone_fmt": "+33 a nn nn nn nn",
+        "id_name": "nir",
+        "cities": {
+            "75001": {"city": "Paris", "state": "Ile-de-France", "area": "1",
+                      "streets": ["Rue de Rivoli", "Avenue des Champs-Elysees", "Rue Saint-Honore", "Boulevard Haussmann"]},
+            "13001": {"city": "Marseille", "state": "Provence-Alpes-Cote d'Azur", "area": "4",
+                      "streets": ["Rue Paradis", "La Canebiere", "Rue Saint-Ferreol", "Quai du Port"]},
+            "69001": {"city": "Lyon", "state": "Auvergne-Rhone-Alpes", "area": "4",
+                      "streets": ["Rue de la Republique", "Place Bellecour", "Rue Victor Hugo", "Rue des Marronniers"]},
+            "33000": {"city": "Bordeaux", "state": "Nouvelle-Aquitaine", "area": "5",
+                      "streets": ["Rue Sainte-Catherine", "Cours de l'Intendance", "Rue Port Dijeaux"]},
+        },
+    },
+    "IT": {
+        "phone_fmt": "+39 a nnn nnnn",
+        "id_name": "codice_fiscale",
+        "cities": {
+            "00187": {"city": "Roma", "state": "Lazio", "area": "06", "cf_code": "H501",
+                      "streets": ["Via del Corso", "Via Veneto", "Piazza di Spagna", "Via Nazionale"]},
+            "20121": {"city": "Milano", "state": "Lombardia", "area": "02", "cf_code": "F205",
+                      "streets": ["Via Montenapoleone", "Corso Buenos Aires", "Via della Moscova", "Corso Vittorio Emanuele II"]},
+            "10121": {"city": "Torino", "state": "Piemonte", "area": "011", "cf_code": "L219",
+                      "streets": ["Via Po", "Via Roma", "Via Garibaldi", "Via Pietro Micca"]},
+            "50123": {"city": "Firenze", "state": "Toscana", "area": "055", "cf_code": "D612",
+                      "streets": ["Via de' Tornabuoni", "Via Calzaiuoli", "Borgo Ognissanti"]},
+        },
+    },
+    "ES": {
+        "phone_fmt": "+34 6nn nnn nnn",
+        "id_name": "nie",
+        "cities": {
+            "28013": {"city": "Madrid", "state": "Comunidad de Madrid", "area": "91",
+                      "streets": ["Calle de Alcala", "Gran Via", "Calle de la Montera", "Calle Fuencarral"]},
+            "08001": {"city": "Barcelona", "state": "Cataluna", "area": "93",
+                      "streets": ["La Rambla", "Passeig de Gracia", "Carrer de Balmes"]},
+            "46001": {"city": "Valencia", "state": "Comunidad Valenciana", "area": "96",
+                      "streets": ["Calle Colon", "Calle de la Paz", "Calle San Vicente"]},
+            "41001": {"city": "Sevilla", "state": "Andalucia", "area": "95",
+                      "streets": ["Calle Sierpes", "Avenida de la Constitucion", "Calle Tetuan"]},
+        },
+    },
+    "AU": {
+        "phone_fmt": "+61 4nn nnn nnn",
+        "id_name": "tfn",
+        "cities": {
+            "2000": {"city": "Sydney", "state": "NSW", "area": "2",
+                     "streets": ["George St", "Pitt St", "Oxford St", "Castlereagh St"]},
+            "3000": {"city": "Melbourne", "state": "VIC", "area": "3",
+                     "streets": ["Collins St", "Swanston St", "Bourke St", "Flinders Ln"]},
+            "4000": {"city": "Brisbane", "state": "QLD", "area": "7",
+                     "streets": ["Queen St", "Albert St", "Adelaide St", "Edward St"]},
+            "6000": {"city": "Perth", "state": "WA", "area": "8",
+                     "streets": ["St Georges Terrace", "Hay St", "William St", "Murray St"]},
+        },
+    },
+    "SG": {
+        "phone_fmt": "+65 nnnn nnnn",
+        "id_name": "nric",
+        "cities": {
+            "018956": {"city": "Singapore", "state": "Singapore", "area": "",
+                       "streets": ["Raffles Place", "Robinson Rd", "Marina Blvd", "Cecil St"]},
+            "238859": {"city": "Singapore", "state": "Singapore", "area": "",
+                       "streets": ["Orchard Rd", "Scotts Rd", "Cairnhill Rd", "Cuppage Rd"]},
+        },
+    },
+    "NL": {
+        "phone_fmt": "+31 6 nn nn nn nn",
+        "id_name": "bsn",
+        "cities": {
+            "1012": {"city": "Amsterdam", "state": "Noord-Holland", "area": "20",
+                     "streets": ["Damrak", "Kalverstraat", "Nieuwendijk", "Rokin"]},
+            "3011": {"city": "Rotterdam", "state": "Zuid-Holland", "area": "10",
+                     "streets": ["Coolsingel", "Meent", "Hoogstraat", "Mariniersweg"]},
+            "2511": {"city": "Den Haag", "state": "Zuid-Holland", "area": "70",
+                     "streets": ["Spuistraat", "Grote Marktstraat", "Kneuterdijk"]},
+        },
+    },
+    "SE": {
+        "phone_fmt": "+46 7n nnn nnn",
+        "id_name": "personnummer",
+        "cities": {
+            "111 57": {"city": "Stockholm", "state": "Stockholms lan", "area": "08",
+                       "streets": ["Drottninggatan", "Sveavagen", "Gotgatan", "Kungsgatan"]},
+            "411 03": {"city": "Goteborg", "state": "Vastra Gotaland", "area": "031",
+                       "streets": ["Avenyn", "Drottninggatan", "Kungsgatan"]},
+            "211 22": {"city": "Malmo", "state": "Skane", "area": "040",
+                       "streets": ["Sodra Forstadsgatan", "Ostra Ronneholmsvagen"]},
+        },
+    },
 }
 
 NAMES: dict[str, dict[str, tuple[str, ...]]] = {
@@ -140,6 +252,55 @@ NAMES: dict[str, dict[str, tuple[str, ...]]] = {
                   "Alice", "Laura", "Thiago", "Bruno", "Lucas", "Pedro"),
         "last": ("Silva", "Santos", "Oliveira", "Souza", "Lima", "Pereira",
                  "Costa", "Almeida", "Nascimento", "Araujo", "Ribeiro", "Carvalho"),
+    },
+    "CA": {
+        "first": ("Liam", "Emma", "Noah", "Olivia", "William", "Charlotte",
+                  "Lucas", "Sophie", "Ethan", "Mia", "Benjamin", "Chloe"),
+        "last": ("Smith", "Tremblay", "Gagnon", "Roy", "Cote", "Wilson",
+                 "Taylor", "Campbell", "Martin", "Brown", "Lee", "MacLeod"),
+    },
+    "FR": {
+        "first": ("Lucas", "Emma", "Louis", "Lea", "Marc", "Julie",
+                  "Thomas", "Camille", "Nicolas", "Sarah", "Antoine", "Marine"),
+        "last": ("Martin", "Bernard", "Dubois", "Thomas", "Robert", "Richard",
+                 "Petit", "Durand", "Leroy", "Moreau", "Simon", "Laurent"),
+    },
+    "IT": {
+        "first": ("Francesco", "Chiara", "Alessandro", "Giulia", "Luca", "Martina",
+                  "Matteo", "Federica", "Giovanni", "Silvia", "Marco", "Elena"),
+        "last": ("Rossi", "Russo", "Ferrari", "Esposito", "Bianchi", "Romano",
+                 "Colombo", "Ricci", "Marino", "Greco", "Bruno", "Gallo"),
+    },
+    "ES": {
+        "first": ("Alejandro", "Lucia", "Javier", "Carmen", "Miguel", "Maria",
+                  "David", "Paula", "Jorge", "Alba", "Sergio", "Marta"),
+        "last": ("Garcia", "Fernandez", "Lopez", "Martinez", "Sanchez", "Perez",
+                 "Gomez", "Martin", "Jimenez", "Ruiz", "Hernandez", "Diaz"),
+    },
+    "AU": {
+        "first": ("Jack", "Olivia", "Lachlan", "Charlotte", "Cooper", "Amelia",
+                  "Noah", "Mia", "Harry", "Emily", "Oscar", "Sophie"),
+        "last": ("Smith", "Jones", "Williams", "Brown", "Wilson", "Taylor",
+                 "Lee", "Nguyen", "Martin", "Thompson", "Harris", "Walker"),
+    },
+    "SG": {
+        "first": ("Wei", "Li", "Jun", "Mei", "Kai", "Xin",
+                  "Yong", "Ling", "Jian", "Hui", "Sheng", "Ying"),
+        "last": ("Tan", "Lim", "Lee", "Ng", "Chua", "Ong",
+                 "Goh", "Tay", "Yap", "Wong", "Koh", "Teo"),
+    },
+    "NL": {
+        "first": ("Daan", "Emma", "Sem", "Sophie", "Bram", "Fleur",
+                  "Lars", "Anouk", "Thijs", "Sanne", "Joris", "Iris"),
+        "last": ("de Vries", "Jansen", "van den Berg", "Bakker", "Visser", "Smit",
+                 "Meijer", "Mulder", "de Boer", "Koning", "Vos", "Peters"),
+    },
+    "SE": {
+        "first": ("Erik", "Anna", "Lars", "Maria", "Karl", "Elin",
+                  "Magnus", "Sara", "Anders", "Emma", "Johan", "Karin"),
+        "last": ("Andersson", "Johansson", "Karlsson", "Nilsson", "Eriksson",
+                 "Larsson", "Olsson", "Persson", "Svensson", "Gustafsson",
+                 "Lindberg", "Lindqvist"),
     },
 }
 
@@ -215,6 +376,158 @@ def br_cpf(rnd: Any = random) -> str:
 def de_steuer(rnd: Any = random) -> str:
     """German Tax ID / Personalausweis shape."""
     return f"{rnd.randint(10, 99)}{rnd.randint(100000, 999999)}"[:11]
+
+
+def _luhn_check_digit(digits: str) -> str:
+    """Luhn check digit (ISO/IEC 7812) for a partial numeric string."""
+    total = 0
+    for i, d in enumerate([int(c) for c in digits][::-1]):
+        if i % 2 == 0:
+            d *= 2
+            if d > 9:
+                d -= 9
+        total += d
+    return str((10 - (total % 10)) % 10)
+
+
+def ca_sin(rnd: Any = random) -> str:
+    """Canadian Social Insurance Number: 9 digits, Luhn-valid, first digit 1-8.
+
+    Digits 9 excludes temporary-status SINs; 0 is not issued.
+    """
+    while True:
+        partial = f"{rnd.randint(1, 8)}{rnd.randint(0, 9999999):07d}"
+        out = partial + _luhn_check_digit(partial)
+        if int(out) % 100 > 0:  # avoid the all-zeros-looking reserved pattern
+            return out
+
+
+def fr_nir(zip_code: str, dob: Optional[str] = None, female: bool = False,
+           rnd: Any = random) -> str:
+    """French INSEE/NIR: sex(1) YY MM dep(2) com(3) ord(3) + mod-97 key(2).
+
+    15 digits; key = 97 - (first 13 digits mod 97). Department comes from the
+    address's postal code so the ID matches the identity that owns it.
+    """
+    if dob:
+        mm, dd, yy = dob.split("/")
+    else:
+        yy = str(rnd.randint(1961, 2008))
+        mm = f"{rnd.randint(1, 12):02d}"
+        dd = f"{rnd.randint(1, 28):02d}"
+    sex = "2" if female else "1"
+    dep = str(zip_code)[:2]
+    com = f"{rnd.randint(0, 999):03d}"
+    ord_ = f"{rnd.randint(1, 999):03d}"
+    num = f"{sex}{yy[2:]}{mm}{dep}{com}{ord_}"
+    key = 97 - (int(num) % 97)
+    return f"{num}{key:02d}"
+
+
+def it_cf(last: str, first: str, dob: Optional[str] = None, female: bool = False,
+          cf_code: str = "H501", rnd: Any = random) -> str:
+    """Italian Codice Fiscale: 16 char (surname/given/year/month/day/place)+EIGEN.
+
+    Uses the official einfachen tables: consonants first (given name takes the
+    1st, 3rd and 4th when there are four or more), vowel padding to X, real
+    check digit over the 15-char body.
+    """
+    _VOWELS = "AEIOU"
+
+    def block(word: str, surname: bool) -> str:
+        word = (word or "").upper()
+        cons = [c for c in word if c.isalpha() and c not in _VOWELS]
+        vows = [c for c in word if c in _VOWELS]
+        if surname:
+            letters = (cons + vows)[:3]
+        elif len(cons) >= 4:
+            letters = [cons[0], cons[2], cons[3]]
+        else:
+            letters = (cons + vows)[:3]
+        return "".join(letters).ljust(3, "X")
+
+    if dob:
+        mm, dd, yy = dob.split("/")
+    else:
+        yy = str(rnd.randint(1961, 2008))
+        mm = f"{rnd.randint(1, 12):02d}"
+        dd = f"{rnd.randint(1, 28):02d}"
+    day = str(int(dd) + (40 if female else 0)).rjust(2, "0")
+    body = f"{block(last, True)}{block(first, False)}{yy[2:]}{'ABCDEHLMPRST'[int(mm)-1]}{day}{cf_code}"
+
+    odd = {"0": 1, "1": 0, "2": 5, "3": 7, "4": 9, "5": 13, "6": 15, "7": 17, "8": 19, "9": 21,
+           "A": 1, "B": 0, "C": 5, "D": 7, "E": 9, "F": 13, "G": 15, "H": 17, "I": 19,
+           "J": 21, "K": 2, "L": 4, "M": 18, "N": 20, "O": 11, "P": 3, "Q": 6, "R": 8,
+           "S": 12, "T": 14, "U": 16, "V": 10, "W": 22, "X": 25, "Y": 24, "Z": 23}
+    even = {"0": 0, "1": 1, "2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9,
+            "A": 0, "B": 1, "C": 2, "D": 3, "E": 4, "F": 5, "G": 6, "H": 7, "I": 8, "J": 9,
+            "K": 10, "L": 11, "M": 12, "N": 13, "O": 14, "P": 15, "Q": 16, "R": 17, "S": 18,
+            "T": 19, "U": 20, "V": 21, "W": 22, "X": 23, "Y": 24, "Z": 25}
+    total = 0
+    for i, ch in enumerate(body):
+        total += (odd if i % 2 == 0 else even)[ch]
+    return body + chr(65 + (total % 26))
+
+
+def es_nie(rnd: Any = random) -> str:
+    """Spanish DNI/NIE: 8 digits + control letter (num % 23 table)."""
+    table = "TRWAGMYFPDXBNJZSQVHLCKE"
+    num = rnd.randint(1000000, 99999999)
+    return f"{num:08d}{table[num % 23]}"
+
+
+def au_tfn(rnd: Any = random) -> str:
+    """Australian Tax File Number: 9 digits whose weighted sum is 0 mod 11.
+
+    Weights (1,4,3,7,5,8,6,9,10) run from the least significant digit.
+    """
+    while True:
+        digits = [rnd.randint(0, 9) for _ in range(8)]
+        digits[0] = rnd.randint(1, 9)
+        # weights increase right-to-left: d9 gets 10, d1 gets 1
+        s8 = sum(d * w for d, w in zip(digits, (1, 4, 3, 7, 5, 8, 6, 9)))
+        d9 = (10 * ((11 - s8 % 11) % 11)) % 11
+        if 0 <= d9 <= 9:
+            return "".join(map(str, digits)) + str(d9)
+
+
+def sg_nric(rnd: Any = random) -> str:
+    """Singapore NRIC (S series): S + 7 digits + check letter (sum % 11 table)."""
+    weights = (2, 7, 6, 5, 4, 3, 2)
+    digits = [str(rnd.randint(0, 9)) for _ in range(7)]
+    rem = sum(int(d) * w for d, w in zip(digits, weights)) % 11
+    nric_type = rnd.choice(("S", "T"))
+    if nric_type == "S":
+        return "S" + "".join(digits) + "JZIHGFEDCBA"[rem]
+    return "T" + "".join(digits) + "XWUTRQPNMLK"[rem]
+
+
+def nl_bsn(rnd: Any = random) -> str:
+    """Dutch BSN: 9 digits with (9..2 * first eight) - ninth == 0 mod 11."""
+    while True:
+        digits = [rnd.randint(0, 9) for _ in range(8)]
+        digits[0] = rnd.randint(1, 9)
+        s8 = sum(d * w for d, w in zip(digits, (9, 8, 7, 6, 5, 4, 3, 2)))
+        d9 = s8 % 11
+        if d9 != 10:
+            return "".join(map(str, digits)) + str(d9)
+
+
+def se_personnummer(dob: Optional[str] = None, rnd: Any = random) -> str:
+    """Swedish personnummer: YYYYMMDDNNNC where C is a Luhn check digit.
+
+    12-digit identity card format; the checksum is computed over the 9-digit
+    string YYMMDD + serial, the documented form.
+    """
+    if dob:
+        mm, dd, yy = dob.split("/")
+    else:
+        yy = str(rnd.randint(1961, 2008))
+        mm = f"{rnd.randint(1, 12):02d}"
+        dd = f"{rnd.randint(1, 28):02d}"
+    serial = f"{rnd.randint(0, 999):03d}"
+    check = _luhn_check_digit(f"{yy[2:]}{mm}{dd}{serial}")
+    return f"{yy}{mm}{dd}{serial}{check}"
 
 
 def format_phone(fmt: str, area: str, rnd: Any = random) -> str:
