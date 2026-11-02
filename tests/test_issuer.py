@@ -416,6 +416,23 @@ def test_funnel_flags_unclassified_asn():
     assert any("unclassified" in d.lower() for d in layer1["details"])
 
 
+def test_funnel_uses_supplied_latencies():
+    """--latencies replaces the hardcoded defaults the funnel used to assume."""
+    r = subprocess.run([sys.executable, "forge.py", "funnel", "--country", "US",
+                        "--latencies", "5,50,150,250", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    lat = [l["latency_ms"] for l in json.loads(r.stdout)["layers"]]
+    assert lat == [5.0, 50.0, 150.0, 250.0]
+
+
+def test_funnel_rejects_wrong_latency_count():
+    r = subprocess.run([sys.executable, "forge.py", "funnel", "--latencies", "1,2,3"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "expected 4 comma-separated latencies" in r.stderr
+
+
 def test_running_the_suite_offline_is_fast():
     """audit/funnel used to call a third-party VPN API with a 12s timeout."""
     import time as _time

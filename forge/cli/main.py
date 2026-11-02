@@ -93,6 +93,26 @@ def _parse_latencies(raw: str) -> list[float]:
     return values
 
 
+def _parse_funnel_latencies(raw: str) -> dict[str, float]:
+    """'15,45,120,210' -> {edge,backend,gateway,issuer} latencies in ms.
+
+    Four values, because the funnel models four layers and each verdict carries
+    one latency. Fewer means the remaining layers keep invented defaults.
+    """
+    keys = ("edge", "backend", "gateway", "issuer")
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if len(parts) != 4:
+        raise argparse.ArgumentTypeError(
+            f"expected 4 comma-separated latencies (edge,backend,gateway,issuer), got {len(parts)}")
+    try:
+        vals = [float(p) for p in parts]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"latencies must be numbers, got {raw!r}")
+    if any(v < 0 for v in vals):
+        raise argparse.ArgumentTypeError("latencies must be non-negative")
+    return dict(zip(keys, vals))
+
+
 def _egress_meta(a: argparse.Namespace) -> dict[str, str]:
     """Build the egress description from what the caller stated.
 
@@ -347,9 +367,15 @@ def cmd_run(a: argparse.Namespace) -> int:
         print(dim("      Target   : Offline mode (evaluating staging defense layers)"))
     # 4-Layer Funnel Simulation
     print(bold("\n  [4/5] 4-LAYER TRANSACTION FUNNEL SIMULATION"))
-    bin_ = getattr(a, "bin", None) or get_default_bin_for_country(country)
+    bin_ = _resolve_bin_or_fail(a, country)
+    if bin_ is None:
+        return 1
     card_meta = issuer_lookup(bin_)
-    funnel = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof, probe=probe_result if target else None)
+    funnel = TransactionFunnelSimulator.evaluate(
+        hdrs, fz, card_meta, exit_meta, prof,
+        probe=probe_result if target else None,
+        simulated_latencies=getattr(a, "latencies", None),
+    )
 
     for l in funnel.layers:
         v_icon = ok("✔") if l.verdict == "PASS" else (warn("!") if l.verdict == "FLAG" else bad("✘"))
@@ -464,7 +490,10 @@ def cmd_funnel(a: argparse.Namespace) -> int:
     if a.idempotency:
         hdrs["Idempotency-Key"] = IdempotencyManager().generate_key("funnel-sim")
 
-    res = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
+    res = TransactionFunnelSimulator.evaluate(
+        hdrs, fz, card_meta, exit_meta, prof,
+        simulated_latencies=getattr(a, "latencies", None),
+    )
     if a.json:
         data = {
             "final_disposition": res.final_disposition,
@@ -663,6 +692,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("-o", "--output", default=None, help="Path to save audit report JSON")
     p_run.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
                        default="unknown", help="Classification of the exit ASN (default: unknown)")
+    p_run.add_argument("--latencies", type=_parse_funnel_latencies, default=None,
+                       help="Per-layer latencies in ms: edge,backend,gateway,issuer (used when offline)")
 
     # audit
     p_audit = sub.add_parser("audit", help="Audit transaction telemetry against fraud scoring heuristics")
@@ -692,6 +723,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="Country your traffic actually exits from (omitted = undetermined)")
     p_funnel.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
                           default="unknown", help="Classification of the exit ASN (default: unknown)")
+    p_funnel.add_argument("--latencies", type=_parse_funnel_latencies, default=None,
+                          help="Per-layer latencies in ms: edge,backend,gateway,issuer (e.g. 15,45,120,210)")
     p_funnel.add_argument("--idempotency", action="store_true", help="Include Idempotency-Key header")
     p_funnel.add_argument("--json", action="store_true")
 

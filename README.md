@@ -187,6 +187,9 @@ forge funnel --country US
 forge funnel --country BR --egress-country BR
 forge funnel --country JP --egress-country US --asn-type datacenter
 
+# State per-layer latencies in ms instead of letting the funnel assume defaults
+forge funnel --country US --latencies 15,45,120,210
+
 # Include Idempotency-Key header to test backend validation
 forge funnel --country US --idempotency
 
