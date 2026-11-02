@@ -7,7 +7,7 @@ import sys
 import argparse
 import pytest
 
-from forge.cards.bins import BIN_DB, COUNTRY_DEFAULT_BIN, get_default_bin_for_country
+from forge.cards.bins import BIN_DB, COUNTRY_DEFAULT_BIN, get_default_bin_for_country, issuer_lookup
 from forge.identity import make_fullz
 
 
@@ -194,4 +194,55 @@ def test_subprocess_issuer_default_json():
     meta = json.loads(r.stdout)
     assert meta["bin"] == "400403"
     assert meta["issuer"] == "Banco do Brasil"
+
+
+def test_public_test_pans_are_not_issuers():
+    """424242 / 411111 are publicly documented test PANs (Stripe, generic Visa).
+
+    No issuer owns them, so a lookup table that answers with a country and a
+    currency for those prefixes is describing a card that cannot exist. Forge
+    only ships prefixes that resolve to a real issuer.
+    """
+    for pan in ("4242424242424242", "4111111111111111", "424242", "411111"):
+        meta = issuer_lookup(pan)
+        assert meta["bin"] == "Unknown", pan
+        assert meta["issuer"] == "Unknown", pan
+    assert "424242" not in BIN_DB
+    assert "411111" not in BIN_DB
+
+
+def test_no_mock_harness_command():
+    """`forge test-mock` was a stub that typed a fixture at a localhost port.
+
+    It was removed: the tool reports on real systems, so it does not carry a
+    command whose only job is talking to a fake one.
+    """
+    from forge.cli.main import build_parser
+    parser = build_parser()
+    sub = next(a for a in parser._actions if isinstance(a, argparse._SubParsersAction))
+    assert "test-mock" not in sub.choices
+
+
+def test_maturity_requires_measured_input():
+    """`forge maturity` must refuse to invent a scorecard."""
+    r = subprocess.run([sys.executable, "forge.py", "maturity"],
+                       capture_output=True, text=True)
+    assert r.returncode != 0
+    assert "--tp" in r.stderr
+
+
+def test_maturity_scores_supplied_counts():
+    r = subprocess.run([sys.executable, "forge.py", "maturity",
+                        "--tp", "95", "--tn", "980", "--fp", "20", "--fn", "5",
+                        "--latencies", "15.2,22.4,45.1,88,112.5", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    cm = data["confusion_matrix"]
+    assert cm["true_positives"] == 95
+    assert cm["false_positives"] == 20
+    # FPR = fp / (tn + fp) = 20 / 1000
+    assert abs(cm["false_positive_rate"] - 0.02) < 1e-9
+    assert data["latency_percentiles"]["sample_count"] == 5
+    assert data["audit_trail_completeness"] is None
 

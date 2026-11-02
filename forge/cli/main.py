@@ -5,7 +5,6 @@ import argparse
 import ipaddress
 import json
 import os
-import random
 import sys
 import time
 from pathlib import Path
@@ -46,6 +45,7 @@ from forge.defenders import (
     TransactionFunnelSimulator,
 )
 from forge.payments.decline_codes import DeclineCodeTaxonomy
+from forge.payments.idempotency import IdempotencyManager
 from forge.payments.state_machine import PaymentStateMachine
 
 def is_local_or_private_target(url: str) -> bool:
@@ -73,6 +73,17 @@ def _ask(prompt: str, default: str = "") -> str:
     msg = f"  {prompt} [{default}]: " if default else f"  {prompt}: "
     val = input(msg).strip()
     return val if val else default
+
+
+def _parse_latencies(raw: str) -> list[float]:
+    """Turn '15.2,22.4,45.1' into floats, rejecting anything unparseable."""
+    try:
+        values = [float(x) for x in raw.split(",") if x.strip()]
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"latencies must be comma-separated numbers, got {raw!r}")
+    if not values:
+        raise argparse.ArgumentTypeError("at least one latency sample is required")
+    return values
 
 
 def cmd_id(a: argparse.Namespace) -> int:
@@ -141,7 +152,7 @@ def cmd_issuer(a: argparse.Namespace) -> int:
             print(json.dumps([{"bin": b, **m} for b, m in sorted(rows.items(), key=lambda kv: (kv[1]["country"], kv[0]))], indent=2))
             return 0
         if not rows:
-            print(f"No issuers match")
+            print("No issuers match")
             return 1
         width_bin = max(len(b) for b in rows)
         print(f"\n forge issuer — {len(rows)} result(s)\n" + "─" * 56)
@@ -149,8 +160,6 @@ def cmd_issuer(a: argparse.Namespace) -> int:
             flags = []
             if m.get("is_prepaid"):
                 flags.append("prepaid")
-            if m.get("is_test"):
-                flags.append("[TEST]")
             print(f"  {b:<{width_bin}}  {m['network']:<13} {m['issuer']:<24} {m['country']} {m['currency']} {m['funding']}"
                   + (" " + " ".join(flags) if flags else ""))
         print("─" * 56)
@@ -169,7 +178,6 @@ def cmd_issuer(a: argparse.Namespace) -> int:
         print(f"  pan_length   : {meta['pan_length']}")
         print(f"  bin_length   : {meta['bin_length']}")
         print(f"  is_prepaid   : {meta.get('is_prepaid', False)}")
-        print(f"  is_test      : {meta.get('is_test', False)}")
         print("─" * 56)
         return 0
     if a.subcommand == "default":
@@ -186,28 +194,6 @@ def cmd_issuer(a: argparse.Namespace) -> int:
         print("─" * 56)
         return 0
     return 1
-
-
-def cmd_mock_test(a: argparse.Namespace) -> int:
-    """Placeholder harness for testing local endpoints (e.g. stripe-mock, local dev servers)."""
-    target = a.url or os.environ.get("FORGE_LOCAL_TEST_URL", "http://127.0.0.1:12111")
-    print(bold(f"\n forge local test harness\n" + "─" * 48))
-    print(f"  Target Endpoint : {target}")
-    print(f"  Mode            : Local Diagnostic & Functional Verification")
-
-    try:
-        # Local mock endpoints do not require proxies
-        with TLSSession(proxy=None, strict_proxy=False) as s:
-            r = s.get(target, timeout=5.0)
-            status_text = ok(f"HTTP {r.status_code}") if r.status_code < 400 else bad(f"HTTP {r.status_code}")
-            print(f"  Health Check    : {status_text} ({len(r.content)} bytes)")
-    except Exception as e:
-        print(warn(f"  Health Check    : Failed to reach local test target ({e})"))
-        print(dim("  (Ensure local test mock server, e.g. stripe-mock or local app, is running)"))
-        return 1
-
-    print(ok("  Local test endpoint responded successfully."))
-    return 0
 
 
 def cmd_run(a: argparse.Namespace) -> int:
@@ -262,7 +248,7 @@ def cmd_run(a: argparse.Namespace) -> int:
 
     prof = get_impersonate_profile()
     hdrs = build_headers(prof)
-    idemp_key = f"forge_{int(time.time())}_{random.randint(1000, 9999)}"
+    idemp_key = IdempotencyManager().generate_key(target or "offline")
     hdrs["Idempotency-Key"] = idemp_key
     if auth_token:
         hdrs["Authorization"] = f"Bearer {auth_token}" if not auth_token.startswith("Bearer ") else auth_token
@@ -418,7 +404,7 @@ def cmd_funnel(a: argparse.Namespace) -> int:
     prof = get_impersonate_profile()
     hdrs = build_headers(prof)
     if a.idempotency:
-        hdrs["Idempotency-Key"] = "test_key_123"
+        hdrs["Idempotency-Key"] = IdempotencyManager().generate_key("funnel-sim")
 
     res = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
     if a.json:
@@ -487,48 +473,54 @@ def cmd_currency(a: argparse.Namespace) -> int:
 
 
 def cmd_maturity(a: argparse.Namespace) -> int:
-    matrix = DefenseMaturityEvaluator.calculate_confusion_matrix(tp=95, tn=980, fp=20, fn=5)
-    latencies = [15.2, 22.4, 45.1, 88.0, 112.5, 140.2, 210.0, 310.5, 450.0, 620.0]
-    lat = DefenseMaturityEvaluator.benchmark_latency(latencies)
-    sample_log = {
-        "transaction_id": "tx_staging_123",
-        "timestamp_utc": "2026-11-01T08:00:00Z",
-        "client_ip": "146.70.228.82",
-        "egress_asn": "AS9009",
-        "tls_ja4_fingerprint": "t13d1516h2_8daaf6152771_b0da82dd1658",
-        "avs_code": "Y",
-        "cvv_result": "match",
-        "iso_8583_response_code": "00",
-        "decision": "ALLOW",
-        "rule_id": "rule_default_allow",
-    }
-    audit = DefenseMaturityEvaluator.audit_trail_completeness(sample_log)
+    """Score a real defence run. Every number is parsed from input or read from a
+    file; the command refuses to print a scorecard it invented."""
+    matrix = DefenseMaturityEvaluator.calculate_confusion_matrix(
+        tp=a.tp, tn=a.tn, fp=a.fp, fn=a.fn
+    )
+    lat = DefenseMaturityEvaluator.benchmark_latency(a.latencies)
+
+    audit = None
+    if a.audit_log:
+        try:
+            with open(a.audit_log) as fh:
+                audit = DefenseMaturityEvaluator.audit_trail_completeness(json.load(fh))
+        except (OSError, json.JSONDecodeError) as e:
+            print(bad(f"Cannot read audit log {a.audit_log}: {e}"))
+            return 1
 
     if a.json:
         data = {
             "confusion_matrix": matrix.__dict__,
             "latency_percentiles": lat.__dict__,
-            "audit_trail_completeness": audit.__dict__,
+            "audit_trail_completeness": audit.__dict__ if audit else None,
         }
         print(json.dumps(data, indent=2))
         return 0
 
     print(bold("\n forge defense maturity scorecard\n" + "─" * 56))
     print(bold("  [1] Precision & Tradeoff Metrics"))
+    print(dim(f"      counts              : tp={a.tp} tn={a.tn} fp={a.fp} fn={a.fn}"))
     print(f"      False Positive Rate : {matrix.false_positive_rate:.2%} (Conversion Loss Risk)")
     print(f"      False Negative Rate : {matrix.false_negative_rate:.2%} (Fraud Exposure Risk)")
     print(f"      F1-Score / Accuracy : {matrix.f1_score:.4f}")
     print(dim(f"      Assessment          : {matrix.business_impact_summary}"))
 
     print(bold("\n  [2] Detection Latency Percentiles"))
+    print(dim(f"      samples             : {lat.sample_count}"))
     print(f"      p50 (Median)        : {lat.p50_ms} ms")
     print(f"      p95 Percentile      : {lat.p95_ms} ms")
     print(f"      p99 Percentile      : {lat.p99_ms} ms")
     print(f"      Status              : {warn('Degraded (>500ms)') if lat.is_checkout_degraded else ok('Optimal')}")
 
     print(bold("\n  [3] Forensic Audit Trail Index"))
-    print(f"      Completeness        : {audit.completeness_percentage}% ({audit.fields_present}/{audit.total_fields_required} fields)")
-    print(f"      Compliance Grade    : {ok(audit.compliance_grade)}")
+    if audit:
+        print(f"      Completeness        : {audit.completeness_percentage}% ({audit.fields_present}/{audit.total_fields_required} fields)")
+        print(f"      Compliance Grade    : {ok(audit.compliance_grade)}")
+        if audit.missing_critical_fields:
+            print(dim(f"      Missing             : {', '.join(audit.missing_critical_fields)}"))
+    else:
+        print(dim("      skipped — no --audit-log supplied"))
     print("─" * 56)
     return 0
 
@@ -604,9 +596,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--auth", default=None, help="Authorization / Bearer token")
     p_run.add_argument("--method", choices=["GET", "POST"], default=None, help="HTTP method for target probe")
     p_run.add_argument("-o", "--output", default=None, help="Path to save audit report JSON")
-    # test-mock
-    p_mock = sub.add_parser("test-mock", help="Test local mock server (e.g. stripe-mock)")
-    p_mock.add_argument("--url", default=None, help="Local mock endpoint URL")
 
     # audit
     p_audit = sub.add_parser("audit", help="Audit transaction telemetry against fraud scoring heuristics")
@@ -633,7 +622,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_curr.add_argument("--json", action="store_true")
 
     # maturity
-    p_mat = sub.add_parser("maturity", help="Generate defensive maturity and latency scorecard")
+    p_mat = sub.add_parser(
+        "maturity",
+        help="Score a defence run from measured counts and latencies",
+        description="Computes FPR/FNR, latency percentiles and audit-trail completeness "
+                    "from data you supply. It has no built-in numbers.",
+    )
+    p_mat.add_argument("--tp", type=int, required=True, help="True positives (malicious challenged)")
+    p_mat.add_argument("--tn", type=int, required=True, help="True negatives (legitimate allowed)")
+    p_mat.add_argument("--fp", type=int, required=True, help="False positives (legitimate challenged)")
+    p_mat.add_argument("--fn", type=int, required=True, help="False negatives (malicious allowed)")
+    p_mat.add_argument("--latencies", required=True, type=_parse_latencies,
+                       help="Comma-separated decision latencies in ms, e.g. 15.2,22.4,45.1")
+    p_mat.add_argument("--audit-log", default=None,
+                       help="Path to a JSON event log to grade for forensic completeness")
     p_mat.add_argument("--json", action="store_true")
     return p
 
@@ -660,8 +662,6 @@ def main() -> int:
             return cmd_selftest(args)
         elif args.cmd == "run":
             return cmd_run(args)
-        elif args.cmd == "test-mock":
-            return cmd_mock_test(args)
         elif args.cmd == "audit":
             return cmd_audit_risk(args)
         elif args.cmd == "decline":

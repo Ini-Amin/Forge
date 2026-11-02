@@ -190,14 +190,21 @@ forge currency --currency USD --edge-cases
 ```
 
 ### 3. Defense Maturity Scorecard (`forge maturity`)
-Evaluate quantitative defense metrics against production standards:
+Scores a defence run from numbers you measured. The command has no built-in
+figures — without `--tp/--tn/--fp/--fn` and `--latencies` it does nothing, so the
+scorecard can never be mistaken for a demo.
 * **Precision Tradeoffs:** False Positive Rate (FPR) vs. False Negative Rate (FNR).
 * **Latency Percentiles:** p50, p95, and p99 checkout latency impact.
-* **Forensic Audit Trail Index:** Verifies presence of mandatory forensic fields (JA4 hash, AVS, ISO 8583 response code).
+* **Forensic Audit Trail Index:** Verifies presence of mandatory forensic fields (JA4 hash, AVS, ISO 8583 response code) in a real event log you point it at.
 
 ```bash
-forge maturity
-forge maturity --json
+# Counts from your last evaluation run, latencies in milliseconds
+forge maturity --tp 95 --tn 980 --fp 20 --fn 5 \
+               --latencies 15.2,22.4,45.1,88,112.5
+
+# Grade an actual event log for forensic completeness
+forge maturity --tp 95 --tn 980 --fp 20 --fn 5 \
+               --latencies 15.2,22.4,45.1 --audit-log audit/event.json --json
 ```
 
 ---

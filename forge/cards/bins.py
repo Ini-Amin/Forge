@@ -6,10 +6,6 @@ from typing import Any, Dict, Optional
 BIN_DB: dict[str, dict[str, Any]] = {
     "414720": {"network": "Visa", "issuer": "Chase", "country": "US", "currency": "USD",
                "pan_length": 16, "bin_length": 8, "funding": "credit", "is_prepaid": False},
-    "424242": {"network": "Visa", "issuer": "Stripe Test", "country": "US", "currency": "USD",
-               "pan_length": 16, "bin_length": 8, "funding": "credit", "is_test": True, "is_prepaid": False},
-    "411111": {"network": "Visa", "issuer": "Various (generic test)", "country": "US", "currency": "USD",
-               "pan_length": 16, "bin_length": 8, "funding": "credit", "is_test": True, "is_prepaid": False},
     "517805": {"network": "Mastercard", "issuer": "Capital One", "country": "US", "currency": "USD",
                "pan_length": 16, "bin_length": 8, "funding": "credit", "is_prepaid": False},
     "552134": {"network": "Mastercard", "issuer": "Citi", "country": "US", "currency": "USD",

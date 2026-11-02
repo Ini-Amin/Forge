@@ -1,7 +1,7 @@
 """forge.payments.client - Target-agnostic modern PaymentIntent test client.
 
 Provides an end-to-end integration harness for testers, developers, and defenders:
-- Target-agnostic: operates against any compliant staging, mock, or custom payment gateway.
+- Target-agnostic: operates against any compliant staging or custom payment gateway.
 - Enforces RFC 4122 Idempotency-Key headers on all state-changing operations.
 - Intercepts and parses modern PaymentIntent states and next_action 3DS metadata.
 - Integrates with decline code analysis for clear remediation advice.
