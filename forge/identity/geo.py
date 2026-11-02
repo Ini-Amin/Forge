@@ -70,13 +70,13 @@ GEO: dict[str, dict] = {
         "id_name": "nik",
         "cities": {
             "10110": {"city": "Jakarta Pusat", "state": "DKI Jakarta", "area": "021",
-                      "nik_regency": "71", "nik_districts": list(range(1, 17)),  # Kemendagri 31.71.xx
+                      "nik_regency": "71", "nik_districts": list(range(1, 9)),  # 31.71.01-08 (8 kecamatan)
                       "streets": ["Jl. Thamrin", "Jl. Sudirman", "Jl. Kebon Sirih"]},
             "40111": {"city": "Bandung", "state": "Jawa Barat", "area": "022",
-                      "nik_regency": "73", "nik_districts": list(range(1, 31)),  # 32.73.xx
+                      "nik_regency": "73", "nik_districts": list(range(1, 31)),  # 32.73.01-30 (30 kecamatan)
                       "streets": ["Jl. Asia Afrika", "Jl. Braga", "Jl. Merdeka"]},
             "80111": {"city": "Denpasar", "state": "Bali", "area": "0361",
-                      "nik_regency": "71", "nik_districts": list(range(1, 44)),  # 51.71.xx
+                      "nik_regency": "71", "nik_districts": list(range(1, 5)),  # 51.71.01-04 (4 kecamatan)
                       "streets": ["Jl. Sunset Road", "Jl. Teuku Umar", "Jl. Raya Kuta"]},
         },
     },
