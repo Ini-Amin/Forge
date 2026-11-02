@@ -11,6 +11,23 @@ from forge.cards.bins import BIN_DB, COUNTRY_DEFAULT_BIN, get_default_bin_for_co
 from forge.identity import make_fullz
 
 
+@pytest.fixture
+def isolated_storage(tmp_path, monkeypatch):
+    """Point the CLI at a throwaway DB.
+
+    The suite used to write into the real ~/.local/share/forge database, and
+    seeded generation is deterministic, so after enough runs every candidate PAN
+    for a seed was already recorded and generation returned nothing. Tests must
+    not share state with the user's data, or with each other.
+    """
+    from forge.cards.storage import CardStorage
+    import importlib
+    cli = importlib.import_module("forge.cli.main")  # package __init__ shadows the submodule name
+    store = CardStorage(tmp_path / "cards.db", migrate_legacy=False)
+    monkeypatch.setattr(cli, "storage", store)
+    return store
+
+
 def test_get_default_bin_for_country():
     """Each supported country maps to its default BIN; anything else is None.
 
@@ -109,10 +126,9 @@ def test_cmd_issuer_default_json():
     assert meta["issuer"] == "Banco do Brasil"
 
 
-def test_cmd_bin_geo_coherent_default():
+def test_cmd_bin_geo_coherent_default(isolated_storage):
     """forge bin --country picks the country's default BIN, not the first DB row."""
     from forge.cli.main import cmd_bin
-    from forge.cards.storage import storage
     for idx, (country, expected_bin) in enumerate(COUNTRY_DEFAULT_BIN.items()):
         seed = 100 + idx
         a = argparse.Namespace(country=country, bin=None, count=1, month="12",
@@ -128,7 +144,7 @@ def test_cmd_bin_geo_coherent_default():
         assert cards[0]["pan"].startswith(expected_bin), (country, cards[0]["pan"], expected_bin)
 
 
-def test_cmd_bin_no_country_still_defaults_to_us():
+def test_cmd_bin_no_country_still_defaults_to_us(isolated_storage):
     from forge.cli.main import cmd_bin
     a = argparse.Namespace(country=None, bin=None, count=1, month="12",
                            year="30", format="pipe", seed=200, json=True)
@@ -321,4 +337,90 @@ def test_lookup_unparseable_prefix_fails():
                        capture_output=True, text=True)
     assert r.returncode == 1
     assert "Unknown" in r.stdout
+
+
+def test_selftest_does_not_write_to_user_database():
+    """`forge selftest` generated 20 real PANs into the shared dedupe store on
+    every run, permanently consuming candidates that seeded generation needs."""
+    from forge.cards.storage import storage
+    before = storage.total_count()
+    r = subprocess.run([sys.executable, "forge.py", "selftest"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert "20/20 valid" in r.stdout
+    assert storage.total_count() == before
+
+
+def test_audit_and_funnel_refuse_unknown_bin():
+    """The fail-closed rule was only in `bin`; audit and funnel took anything."""
+    for cmd in ("audit", "funnel"):
+        r = subprocess.run([sys.executable, "forge.py", cmd, "--bin", "412290"],
+                           capture_output=True, text=True)
+        assert r.returncode == 1, cmd
+        assert "not in the issuer database" in r.stdout, cmd
+
+
+def test_audit_uses_country_default_bin():
+    r = subprocess.run([sys.executable, "forge.py", "audit", "--country", "BR", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    avs = json.loads(r.stdout)["components"]["avs"]
+    assert avs["passed"] is True
+
+
+def test_audit_honours_explicit_bin_over_country_default():
+    """`--bin 414720` with `--country BR` used to be swallowed by a sentinel
+    comparison, so the mismatch it should report could never be produced."""
+    r = subprocess.run([sys.executable, "forge.py", "audit",
+                        "--country", "BR", "--bin", "414720", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    avs = json.loads(r.stdout)["components"]["avs"]
+    assert avs["passed"] is False
+    assert avs["avs_code"] == "N"
+    assert any("Card issued in US" in reason for reason in avs["reasons"])
+
+
+def test_audit_does_not_invent_egress_country():
+    """With no proxy and no --egress-country, egress must read as undetermined.
+
+    It used to default to the billing country, so every offline audit reported
+    a coherent geo check that had never been performed.
+    """
+    r = subprocess.run([sys.executable, "forge.py", "audit", "--country", "BR", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    geo = json.loads(r.stdout)["components"]["geo_egress"]
+    assert geo["egress_country"] == ""
+    assert geo["coherent"] is False
+    assert any("undetermined" in reason for reason in geo["reasons"])
+
+
+def test_audit_scores_stated_egress():
+    r = subprocess.run([sys.executable, "forge.py", "audit", "--country", "BR",
+                        "--egress-country", "US", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    geo = json.loads(r.stdout)["components"]["geo_egress"]
+    assert geo["egress_country"] == "US"
+    assert geo["risk_penalty"] == 40
+
+
+def test_funnel_flags_unclassified_asn():
+    """An unknown exit ASN is not a clean residential line."""
+    r = subprocess.run([sys.executable, "forge.py", "funnel", "--country", "BR", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    layer1 = json.loads(r.stdout)["layers"][0]
+    assert layer1["verdict"] == "FLAG"
+    assert any("unclassified" in d.lower() for d in layer1["details"])
+
+
+def test_running_the_suite_offline_is_fast():
+    """audit/funnel used to call a third-party VPN API with a 12s timeout."""
+    import time as _time
+    start = _time.monotonic()
+    subprocess.run([sys.executable, "forge.py", "audit", "--country", "US"],
+                   capture_output=True, text=True)
+    assert _time.monotonic() - start < 5.0
 

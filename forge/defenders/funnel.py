@@ -68,10 +68,14 @@ class TransactionFunnelSimulator:
         l1_penalty = 0
         l1_verdict = "PASS"
 
-        asn_type = egress_meta.get("asn_type", "residential").lower()
+        asn_type = egress_meta.get("asn_type", "unknown").lower()
         if asn_type in ("datacenter", "hosting", "vpn"):
             l1_penalty += 35
             l1_details.append(f"High-risk ASN classification: {asn_type.upper()}")
+        elif asn_type == "unknown":
+            # Unverified egress is not clean egress. A flag is the honest verdict.
+            l1_penalty += 10
+            l1_details.append("Exit ASN unclassified — reputation not assessed")
 
         # Check TLS vs UA header alignment
         ua = request_headers.get("User-Agent") or tls_profile.get("ua", "")
@@ -104,7 +108,7 @@ class TransactionFunnelSimulator:
             layer_name="1. Edge / WAF",
             verdict=l1_verdict,
             score_penalty=l1_penalty,
-            details=l1_details or ["Clean residential reputation; consistent browser TLS handshake"],
+            details=l1_details or ["Residential ASN with consistent TLS ClientHello; no live probe supplied"],
             latency_ms=latencies["edge"],
         ))
         total_risk += l1_penalty

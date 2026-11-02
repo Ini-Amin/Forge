@@ -6,6 +6,7 @@ import ipaddress
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -19,7 +20,7 @@ from forge.cards.bins import (
     supported_countries,
 )
 from forge.cards.luhn import format_card, generate_random, is_luhn_valid
-from forge.cards.storage import storage
+from forge.cards.storage import CardStorage, storage
 from forge.cli.doctor import bad, bold, dim, ok, run_doctor, warn
 from forge.identity.generator import (
     display_name,
@@ -92,6 +93,48 @@ def _parse_latencies(raw: str) -> list[float]:
     return values
 
 
+def _egress_meta(a: argparse.Namespace) -> dict[str, str]:
+    """Build the egress description from what the caller stated.
+
+    `audit` and `funnel` used to call matching_proxy(), which reached a
+    third-party VPN API with a 12s timeout and then defaulted to "residential
+    in your own billing country". Both halves were invention: the score passed
+    a geo check nobody had performed. Unknown stays unknown.
+    """
+    return {
+        "country": (getattr(a, "egress_country", None) or "").upper(),
+        "asn_type": getattr(a, "asn_type", None) or "unknown",
+    }
+
+
+def _resolve_bin_or_fail(a: argparse.Namespace, country: Optional[str]) -> Optional[str]:
+    """Pick the BIN for this run, or None after printing why it cannot.
+
+    One implementation for `bin`, `audit` and `funnel`, because a hardcoded
+    parser default of 414720 made "not supplied" indistinguishable from
+    "supplied as Chase US", and a sentinel comparison on that value silently
+    overrode an explicit --bin.
+    """
+    explicit = getattr(a, "bin", None)
+    if explicit:
+        meta = issuer_lookup(explicit)
+        if not meta["bin_known"] and not getattr(a, "allow_unknown_bin", False):
+            print(bad(f"BIN {explicit} is not in the issuer database; country and currency are unknown."))
+            print(dim("A card that cannot be tied to an issuer breaks geo-coherence silently."))
+            print(dim("Use `forge issuer list` to pick a known prefix, or pass --allow-unknown-bin "
+                      "to continue with issuer metadata marked unavailable."))
+            return None
+        return explicit
+
+    cc = (country or "US").upper()
+    default_bin = get_default_bin_for_country(cc)
+    if default_bin is None:
+        print(bad(f"No BIN on file for {cc}; refusing to substitute another country's card."))
+        print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
+        return None
+    return default_bin
+
+
 def cmd_id(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
     fz = make_fullz(country, seed=a.seed)
@@ -138,22 +181,9 @@ def cmd_bin(a: argparse.Namespace) -> int:
     """Generate card fixtures. Refuses to guess when the prefix or country is
     unknown, because a fixture carrying another country's issuer is not a
     fixture, it is a wrong answer that looks right."""
-    if a.bin:
-        bin_ = a.bin
-        if not issuer_lookup(bin_)["bin_known"] and not getattr(a, "allow_unknown_bin", False):
-            print(bad(f"BIN {bin_} is not in the issuer database; country and currency are unknown."))
-            print(dim("A card that cannot be tied to an issuer breaks geo-coherence silently."))
-            print(dim("Use `forge issuer list` to pick a known prefix, or pass --allow-unknown-bin "
-                      "to generate anyway with issuer metadata marked unavailable."))
-            return 1
-    elif a.country:
-        bin_ = get_default_bin_for_country(a.country.upper())
-        if bin_ is None:
-            print(bad(f"No BIN on file for {a.country.upper()}; refusing to substitute another country's card."))
-            print(dim(f"Countries with a coherent BIN: {', '.join(supported_countries())}"))
-            return 1
-    else:
-        bin_ = get_default_bin_for_country("US")
+    bin_ = _resolve_bin_or_fail(a, a.country)
+    if bin_ is None:
+        return 1
 
     cards = generate_random(bin_, a.month, a.year, a.count, card_storage=storage, seed=a.seed)
     if a.json:
@@ -255,14 +285,16 @@ def cmd_run(a: argparse.Namespace) -> int:
     print(bold("\n  [2/5] GEO-MATCHED EGRESS & TLS HANDSHAKE"))
     px = matching_proxy(fz)
     proxy_url = ""
-    exit_meta = {"country": country, "asn_type": "residential"}
+    # Egress is unknown until a proxy actually verifies. Claiming the billing
+    # country here made every no-proxy run look geo-coherent by construction.
+    exit_meta = {"country": "", "asn_type": getattr(a, "asn_type", None) or "unknown"}
     if px and px.get("proxy"):
         vv = verify_proxy(px["proxy"], expect_country=country)
         exit_ip = vv.get("exit_ip") or px.get("host", "?")
-        exit_country = vv.get("country") or country
-        exit_meta = {"country": exit_country, "asn_type": "residential"}
+        exit_country = vv.get("country") or ""
+        exit_meta = {"country": exit_country, "asn_type": getattr(a, "asn_type", None) or "unknown"}
         if vv["ok"]:
-            print(f"      Exit IP  : {exit_ip} ({exit_country}) — {ok('TLS 1.3 Verified')}")
+            print(f"      Exit IP  : {exit_ip} ({exit_country or 'country undetermined'}) — {ok('TLS 1.3 Verified')}")
             proxy_url = px["proxy"]
         else:
             print(bad(f"      Exit IP  : {exit_ip} — FAILED ({vv.get('error')})"))
@@ -374,11 +406,12 @@ def cmd_run(a: argparse.Namespace) -> int:
 
 def cmd_audit_risk(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
+    bin_ = _resolve_bin_or_fail(a, country)
+    if bin_ is None:
+        return 1
     fz = make_fullz(country)
-    bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
     card_meta = issuer_lookup(bin_)
-    px = matching_proxy(fz)
-    exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
+    exit_meta = _egress_meta(a)
     prof = get_impersonate_profile()
 
     audit = FraudRiskAuditor.full_audit(fz, card_meta, exit_meta, prof)
@@ -420,11 +453,12 @@ def cmd_decline(a: argparse.Namespace) -> int:
     return 0
 def cmd_funnel(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
+    bin_ = _resolve_bin_or_fail(a, country)
+    if bin_ is None:
+        return 1
     fz = make_fullz(country)
-    bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
     card_meta = issuer_lookup(bin_)
-    px = matching_proxy(fz)
-    exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
+    exit_meta = _egress_meta(a)
     prof = get_impersonate_profile()
     hdrs = build_headers(prof)
     if a.idempotency:
@@ -555,7 +589,12 @@ def cmd_selftest(a: argparse.Namespace) -> int:
         assert fz["name"] and fz["city"]
     print(f"selftest ok: identities ({', '.join(COUNTRIES)})")
 
-    sample = generate_random("414720", "12", "29", 20, card_storage=storage)
+    # Throwaway DB: a self-test must not consume PANs in the user's dedupe store,
+    # or running it repeatedly would shrink the space real generation can use.
+    with tempfile.TemporaryDirectory() as td:
+        scratch = CardStorage(Path(td) / "selftest.db", migrate_legacy=False)
+        sample = generate_random("414720", "12", "29", 20, card_storage=scratch)
+    assert len(sample) == 20
     assert all(is_luhn_valid(c["pan"]) for c in sample)
     print(f"selftest ok: cards luhn {len(sample)}/{len(sample)} valid")
     print(f"selftest ok: profiles {len(PROFILES)} | database: {storage.db_path}")
@@ -622,11 +661,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--auth", default=None, help="Authorization / Bearer token")
     p_run.add_argument("--method", choices=["GET", "POST"], default=None, help="HTTP method for target probe")
     p_run.add_argument("-o", "--output", default=None, help="Path to save audit report JSON")
+    p_run.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
+                       default="unknown", help="Classification of the exit ASN (default: unknown)")
 
     # audit
     p_audit = sub.add_parser("audit", help="Audit transaction telemetry against fraud scoring heuristics")
     p_audit.add_argument("-c", "--country", choices=COUNTRIES, default="US")
-    p_audit.add_argument("--bin", default="414720")
+    p_audit.add_argument("--bin", default=None,
+                         help="Explicit BIN/PAN prefix (default: geo-coherent for country)")
+    p_audit.add_argument("--allow-unknown-bin", action="store_true",
+                         help="Proceed with a prefix absent from the issuer DB")
+    p_audit.add_argument("--egress-country", default=None,
+                         help="Country your traffic actually exits from (omitted = undetermined)")
+    p_audit.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
+                         default="unknown", help="Classification of the exit ASN (default: unknown)")
     p_audit.add_argument("--json", action="store_true")
 
     # decline
@@ -636,7 +684,14 @@ def build_parser() -> argparse.ArgumentParser:
     # funnel
     p_funnel = sub.add_parser("funnel", help="Simulate transaction traversal across 4 defensive layers")
     p_funnel.add_argument("-c", "--country", choices=COUNTRIES, default="US")
-    p_funnel.add_argument("--bin", default="414720")
+    p_funnel.add_argument("--bin", default=None,
+                          help="Explicit BIN/PAN prefix (default: geo-coherent for country)")
+    p_funnel.add_argument("--allow-unknown-bin", action="store_true",
+                          help="Proceed with a prefix absent from the issuer DB")
+    p_funnel.add_argument("--egress-country", default=None,
+                          help="Country your traffic actually exits from (omitted = undetermined)")
+    p_funnel.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
+                          default="unknown", help="Classification of the exit ASN (default: unknown)")
     p_funnel.add_argument("--idempotency", action="store_true", help="Include Idempotency-Key header")
     p_funnel.add_argument("--json", action="store_true")
 

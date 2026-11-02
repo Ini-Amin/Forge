@@ -183,12 +183,21 @@ Simulate and trace a transaction through the entire defensive pipeline:
 # Simulate funnel traversal for US transaction fixture
 forge funnel --country US
 
+# State where your traffic actually exits; omitted = undetermined, scored as such
+forge funnel --country BR --egress-country BR
+forge funnel --country JP --egress-country US --asn-type datacenter
+
 # Include Idempotency-Key header to test backend validation
 forge funnel --country US --idempotency
 
 # JSON export for CI/CD staging verification
 forge funnel --country JP --json
 ```
+
+`audit` and `funnel` never fetch a proxy on their own, and they never claim an
+egress you did not supply. No `--egress-country` means the geo check is scored
+`Egress country undetermined`, and an omitted `--asn-type` reads `unknown`
+rather than a clean residential line. Supply the values you actually measured.
 
 ### 2. Currency Truncation & Precision Auditor (`forge currency`)
 Audit currency conversions against ISO 4217 zero-decimal (JPY, KRW, VND), three-decimal (KWD, BHD), and fractional cent rounding hazards:

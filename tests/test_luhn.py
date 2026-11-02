@@ -1,7 +1,10 @@
 """Unit tests for Luhn validation, card generation, and issuer lookup."""
+import tempfile
 import unittest
+from pathlib import Path
 
 from forge.cards.bins import card_length, issuer_lookup
+from forge.cards.storage import CardStorage
 from forge.cards.luhn import (
     format_card,
     generate_expiry_date,
@@ -46,7 +49,9 @@ class TestLuhnCards(unittest.TestCase):
         self.assertEqual(meta_unknown["network"], "Unknown")
 
     def test_generate_random(self):
-        cards = generate_random("414720", "12", "30", 10, seed=42)
+        with tempfile.TemporaryDirectory() as td:
+            scratch = CardStorage(Path(td) / "cards.db", migrate_legacy=False)
+            cards = generate_random("414720", "12", "30", 10, seed=42, card_storage=scratch)
         self.assertEqual(len(cards), 10)
         for c in cards:
             self.assertTrue(is_luhn_valid(c["pan"]))
@@ -69,7 +74,9 @@ class TestLuhnCards(unittest.TestCase):
         self.assertTrue(1 <= int(mm) <= 12)
         self.assertTrue(len(yy) == 2 and yy.isdigit())
 
-        cards = generate_random("414720", exp_m="auto", exp_y="auto", count=3)
+        with tempfile.TemporaryDirectory() as td:
+            scratch = CardStorage(Path(td) / "cards.db", migrate_legacy=False)
+            cards = generate_random("414720", exp_m="auto", exp_y="auto", count=3, card_storage=scratch)
         for c in cards:
             self.assertTrue(1 <= int(c["mm"]) <= 12)
             self.assertTrue(len(c["yy"]) == 2)
