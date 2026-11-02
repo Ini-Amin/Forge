@@ -376,9 +376,7 @@ def cmd_run(a: argparse.Namespace) -> int:
         for d in l.details:
             print(dim(f"          • {d}"))
 
-    disp_badge = ok(funnel.final_disposition) if funnel.final_disposition == "SETTLED" else (
-        warn(funnel.final_disposition) if "3DS" in funnel.final_disposition else bad(funnel.final_disposition)
-    )
+    disp_badge = warn(funnel.final_disposition) if funnel.final_disposition in ("AUTHORIZED", "CHALLENGE_3DS") else bad(funnel.final_disposition)
     print(f"\n      Funnel Result : {disp_badge} (Total Risk: {funnel.total_risk_score}/100)")
     if funnel.vulnerabilities_detected:
         for v in funnel.vulnerabilities_detected:
@@ -407,6 +405,7 @@ def cmd_run(a: argparse.Namespace) -> int:
             "layers": [l.__dict__ for l in funnel.layers],
             "vulnerabilities": funnel.vulnerabilities_detected,
             "recommendations": funnel.recommendations,
+            "money_lifecycle": [l.__dict__ for l in funnel.money_lifecycle],
         },
         "currency": curr,
         "cards": cards,
@@ -492,6 +491,7 @@ def cmd_funnel(a: argparse.Namespace) -> int:
             "layers": [l.__dict__ for l in res.layers],
             "vulnerabilities": res.vulnerabilities_detected,
             "recommendations": res.recommendations,
+            "money_lifecycle": [s.__dict__ for s in res.money_lifecycle],
         }
         print(json.dumps(data, indent=2))
         return 0
@@ -508,6 +508,11 @@ def cmd_funnel(a: argparse.Namespace) -> int:
         print(f"  {v_icon} {l.layer_name:<20} [{l.verdict}] (+{l.score_penalty} pts, {lat_txt})")
         for d in l.details:
             print(dim(f"      • {d}"))
+
+    print(dim("─" * 56))
+    print(dim("  Money Lifecycle:"))
+    for s in res.money_lifecycle:
+        print(dim(f"  {s.stage} : {s.verdict} — {s.detail}"))
 
     if res.vulnerabilities_detected:
         print(dim("─" * 56))

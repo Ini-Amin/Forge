@@ -507,6 +507,26 @@ def test_funnel_probe_measures_edge_latency_only():
     assert res.total_latency_ms == 42.5
 
 
+def test_funnel_cli_lifecycle_json():
+    """cmd_funnel JSON exposes the money trace; a US credit card must not
+    claim settlement at approval (offline, no proxy: hermetic).
+
+    `--idempotency` is required to reach the AUTHORIZED branch: offline the
+    missing Idempotency-Key adds 25 risk, pushing the total to 35 and into
+    3DS SCA (CHALLENGE_3DS), where settlement is N/A and no money trace exists.
+    """
+    r = subprocess.run([sys.executable, "forge.py", "funnel", "--country", "US",
+                        "--idempotency", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["final_disposition"] == "AUTHORIZED"
+    assert "money_lifecycle" in data
+    assert len(data["money_lifecycle"]) == 3
+    assert [s["stage"] for s in data["money_lifecycle"]] == ["authorization", "clearing", "settlement"]
+    assert data["money_lifecycle"][2]["verdict"] == "DEFERRED"
+
+
 def test_running_the_suite_offline_is_fast():
     """audit/funnel used to call a third-party VPN API with a 12s timeout."""
     import time as _time
