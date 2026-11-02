@@ -228,6 +228,16 @@ time. Only a live probe (`forge run --target ...`) produces a latency figure,
 and it can time just the edge request — backend, gateway and issuer stay
 `not measured`.
 
+A passing funnel reports `AUTHORIZED`, not `SETTLED`: approval is an
+authorization-time decision, not fund movement. `AUTHORIZED` transactions
+carry a three-stage `money_lifecycle` — authorization → clearing → settlement
+— with verdicts derived only from card funding type, never from invented
+rates, amounts, or dates: credit settles `DEFERRED` (funds move after the
+capture window), debit and prepaid `PASS` (same-day batch / balance deducted
+at capture). `forge funnel --json` adds `money_lifecycle` (per-stage
+verdicts) and `rails_state` (`authorized`, `action_required`, `failed`,
+`unknown`).
+
 ### 2. Currency Truncation & Precision Auditor (`forge currency`)
 Audit currency conversions against ISO 4217 zero-decimal (JPY, KRW, VND), three-decimal (KWD, BHD), and fractional cent rounding hazards:
 

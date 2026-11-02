@@ -1,7 +1,8 @@
 # Payment Lifecycle: authorization / clearing / settlement
 
 Date: 2026-11-03
-Status: proposed (awaiting approval)
+Status: ~~proposed (awaiting approval)~~ implemented — Phase A and Phase C
+landed 2026-11-03; optional wrap-up B skipped (YAGNI)
 Size: small, in two phases (A then C); B optional wrap-up
 
 ## Why
