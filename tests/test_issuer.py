@@ -525,6 +525,7 @@ def test_funnel_cli_lifecycle_json():
     assert len(data["money_lifecycle"]) == 3
     assert [s["stage"] for s in data["money_lifecycle"]] == ["authorization", "clearing", "settlement"]
     assert data["money_lifecycle"][2]["verdict"] == "DEFERRED"
+    assert data["rails_state"] == "authorized"
 
 
 def test_running_the_suite_offline_is_fast():

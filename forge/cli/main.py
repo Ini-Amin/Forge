@@ -406,6 +406,7 @@ def cmd_run(a: argparse.Namespace) -> int:
             "vulnerabilities": funnel.vulnerabilities_detected,
             "recommendations": funnel.recommendations,
             "money_lifecycle": [l.__dict__ for l in funnel.money_lifecycle],
+            "rails_state": funnel.rails_state,
         },
         "currency": curr,
         "cards": cards,
@@ -492,6 +493,7 @@ def cmd_funnel(a: argparse.Namespace) -> int:
             "vulnerabilities": res.vulnerabilities_detected,
             "recommendations": res.recommendations,
             "money_lifecycle": [s.__dict__ for s in res.money_lifecycle],
+            "rails_state": res.rails_state,
         }
         print(json.dumps(data, indent=2))
         return 0
@@ -510,6 +512,7 @@ def cmd_funnel(a: argparse.Namespace) -> int:
             print(dim(f"      • {d}"))
 
     print(dim("─" * 56))
+    print(f"  Rail State       : {dim(res.rails_state)}")
     print(dim("  Money Lifecycle:"))
     for s in res.money_lifecycle:
         print(dim(f"  {s.stage} : {s.verdict} — {s.detail}"))
