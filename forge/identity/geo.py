@@ -70,10 +70,13 @@ GEO: dict[str, dict] = {
         "id_name": "nik",
         "cities": {
             "10110": {"city": "Jakarta Pusat", "state": "DKI Jakarta", "area": "021",
+                      "nik_regency": "71", "nik_districts": list(range(1, 17)),  # Kemendagri 31.71.xx
                       "streets": ["Jl. Thamrin", "Jl. Sudirman", "Jl. Kebon Sirih"]},
             "40111": {"city": "Bandung", "state": "Jawa Barat", "area": "022",
+                      "nik_regency": "73", "nik_districts": list(range(1, 31)),  # 32.73.xx
                       "streets": ["Jl. Asia Afrika", "Jl. Braga", "Jl. Merdeka"]},
             "80111": {"city": "Denpasar", "state": "Bali", "area": "0361",
+                      "nik_regency": "71", "nik_districts": list(range(1, 44)),  # 51.71.xx
                       "streets": ["Jl. Sunset Road", "Jl. Teuku Umar", "Jl. Raya Kuta"]},
         },
     },
@@ -155,14 +158,15 @@ def us_ssn(state: str, rnd: Any = random) -> str:
 
 
 def id_nik(zip_code: str, rnd: Any = random, dob: Optional[str] = None, female: bool = False) -> str:
-    """Indonesian NIK (16 digit): PP KK CC DDMMYY SSSS.
+    """Indonesian NIK (16 digit): PP KK CC DDMMYY SSSS using Kemendagri codes.
 
-    PP=province, KK=regency, CC=district codes; DDMMYY=birthdate (female: day+40);
-    SSSS=registration serial (>=1).
+    PP=province, KK=regency, CC=district from the ZIP's city record;
+    DDMMYY=birthdate (female: day+40); SSSS=registration serial (>=1).
     """
+    geo = GEO["ID"]["cities"].get(zip_code)
     prov = {"10110": "31", "40111": "32", "80111": "51"}.get(zip_code, "31")
-    reg = f"{rnd.randint(1, 75):02d}"
-    dist = f"{rnd.randint(1, 57):02d}"
+    reg = (geo or {}).get("nik_regency") or f"{rnd.randint(1, 75):02d}"
+    dist = f"{rnd.choice((geo or {}).get('nik_districts') or range(1, 58)):02d}"
     if dob:
         mm, dd, yy = dob.split("/")
         yy = yy[2:]
