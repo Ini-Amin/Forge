@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
 
-from forge.cards.bins import BIN_DB, get_default_bin_for_country, issuer_lookup
+from forge.cards.bins import BIN_DB, bins_by, get_default_bin_for_country, issuer_lookup
 from forge.cards.luhn import format_card, generate_random, is_luhn_valid
 from forge.cards.storage import storage
 from forge.cli.doctor import bad, bold, dim, ok, run_doctor, warn
@@ -47,6 +47,7 @@ from forge.defenders import (
 )
 from forge.payments.decline_codes import DeclineCodeTaxonomy
 from forge.payments.state_machine import PaymentStateMachine
+
 def is_local_or_private_target(url: str) -> bool:
     """Return True if target is a loopback, local development, or private network address."""
     host = (urlparse(url).hostname or "").lower()
@@ -77,6 +78,13 @@ def _ask(prompt: str, default: str = "") -> str:
 def cmd_id(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
     fz = make_fullz(country, seed=a.seed)
+    if a.card:
+        default_bin = get_default_bin_for_country(country)
+        meta = issuer_lookup(default_bin)
+        fz["card_bin"] = default_bin
+        fz["card_network"] = meta["network"]
+        fz["card_issuer"] = meta["issuer"]
+        fz["card_currency"] = meta["currency"]
     if a.json:
         print(json.dumps(fz, indent=2))
         return 0
@@ -106,17 +114,78 @@ def cmd_fp(a: argparse.Namespace) -> int:
 
 
 def cmd_bin(a: argparse.Namespace) -> int:
-    bin_ = a.bin
+    if a.country:
+        bin_ = a.bin or get_default_bin_for_country(a.country.upper())
+        if issuer_lookup(bin_).get("bin") == "Unknown":
+            print(bad(f"\n No BIN for country {a.country} (use `forge issuer list --country {a.country}`)"))
+            return 1
+    else:
+        bin_ = a.bin or "414720"
     cards = generate_random(bin_, a.month, a.year, a.count, card_storage=storage, seed=a.seed)
     if a.json:
         print(json.dumps(cards, indent=2))
         return 0
-
     print(bold(f"\n forge cards — BIN {bin_} ({len(cards)} items)\n" + "─" * 48))
     for c in cards:
         print(f"  {format_card(c, a.format)}")
     print("─" * 48)
     return 0
+
+
+def cmd_issuer(a: argparse.Namespace) -> int:
+    if a.subcommand == "list":
+        rows = bins_by(network=getattr(a, "network", None), country=getattr(a, "country", None))
+        if getattr(a, "issuer", None):
+            rows = {b: m for b, m in rows.items() if a.issuer.lower() in m["issuer"].lower()}
+        if a.json:
+            print(json.dumps([{"bin": b, **m} for b, m in sorted(rows.items(), key=lambda kv: (kv[1]["country"], kv[0]))], indent=2))
+            return 0
+        if not rows:
+            print(f"No issuers match")
+            return 1
+        width_bin = max(len(b) for b in rows)
+        print(f"\n forge issuer — {len(rows)} result(s)\n" + "─" * 56)
+        for b, m in sorted(rows.items(), key=lambda kv: (kv[1]["country"], kv[0])):
+            flags = []
+            if m.get("is_prepaid"):
+                flags.append("prepaid")
+            if m.get("is_test"):
+                flags.append("[TEST]")
+            print(f"  {b:<{width_bin}}  {m['network']:<13} {m['issuer']:<24} {m['country']} {m['currency']} {m['funding']}"
+                  + (" " + " ".join(flags) if flags else ""))
+        print("─" * 56)
+        return 0
+    if a.subcommand == "lookup":
+        meta = issuer_lookup(a.query)
+        if meta["bin"] == "Unknown":
+            print(f"Unknown BIN/pan prefix: {a.query}")
+            return 1
+        if a.json:
+            print(json.dumps(meta, indent=2))
+            return 0
+        print(f"\n forge issuer lookup — {a.query}\n" + "─" * 56)
+        for key in ("bin", "network", "issuer", "country", "currency", "funding"):
+            print(f"  {key:<12}: {meta[key]}")
+        print(f"  pan_length   : {meta['pan_length']}")
+        print(f"  bin_length   : {meta['bin_length']}")
+        print(f"  is_prepaid   : {meta.get('is_prepaid', False)}")
+        print(f"  is_test      : {meta.get('is_test', False)}")
+        print("─" * 56)
+        return 0
+    if a.subcommand == "default":
+        bin_ = get_default_bin_for_country(a.country.upper())
+        if a.json:
+            print(json.dumps({"country": a.country, "bin": bin_, **issuer_lookup(bin_)}, indent=2))
+            return 0
+        meta = issuer_lookup(bin_)
+        print(f"forge issuer default — {a.country.upper()}\n" + "─" * 56)
+        for key in ("bin", "network", "issuer", "country", "currency", "funding"):
+            print(f"  {key:<12}: {meta[key]}")
+        print(f"  pan_length   : {meta['pan_length']}")
+        print(f"  bin_length   : {meta['bin_length']}")
+        print("─" * 56)
+        return 0
+    return 1
 
 
 def cmd_mock_test(a: argparse.Namespace) -> int:
@@ -145,21 +214,24 @@ def cmd_run(a: argparse.Namespace) -> int:
     print(bold(BANNER))
     print(bold(" 🛠️  FORGE UNIFIED DEFENSIVE EMULATION PIPELINE\n"))
 
+    tty = sys.stdin.isatty()
+
     # 1. Inputs: Region, Target URL, Card Count
-    country = getattr(a, "country", None) or _ask("1. Target Region (US/GB/JP/ID/DE/BR)", "US").upper()
+    country = getattr(a, "country", None) or (_ask("1. Target Region (US/GB/JP/ID/DE/BR)", "US").upper() if tty else "US")
     if country not in COUNTRIES:
         country = "US"
 
     target = getattr(a, "target", None)
     if target is None:
-        target = _ask("2. Target Endpoint URL (Enter = offline staging audit)", "").strip()
+        target = _ask("2. Target Endpoint URL (Enter = offline staging audit)", "").strip() if tty else ""
 
     auth_token = getattr(a, "auth", None) or os.environ.get("FORGE_AUTH_TOKEN", "")
-    if target and not auth_token and sys.stdin.isatty():
+    if target and not auth_token and tty:
         auth_token = _ask("3. Authorization Bearer / Token (Enter = none)", "").strip()
 
     count_val = getattr(a, "count", None)
-    count = int(count_val) if count_val else int(_ask("4. Number of test card fixtures", "5"))
+    count = int(count_val) if count_val else int(_ask("4. Number of test card fixtures", "5") if tty else "5")
+    count = min(count, 50)
 
     print(f"\n{dim('━' * 60)}")
     print(bold(f"  [1/5] SYNTHETIC IDENTITY & REGIONAL PROFILE ({country})"))
@@ -486,6 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_id.add_argument("-c", "--country", choices=COUNTRIES, default="US")
     p_id.add_argument("--seed", type=int, default=None)
     p_id.add_argument("--json", action="store_true")
+    p_id.add_argument("--card", action="store_true", help="Include a geo-coherent card BIN in output")
 
     # fp
     p_fp = sub.add_parser("fp", help="Generate browser fingerprint profile")
@@ -493,13 +566,29 @@ def build_parser() -> argparse.ArgumentParser:
 
     # bin
     p_bin = sub.add_parser("bin", help="Generate Luhn test cards")
-    p_bin.add_argument("--bin", default="414720")
+    p_bin.add_argument("--country", default=None, help="Auto-pick a geo-coherent BIN for this country")
+    p_bin.add_argument("--bin", default=None, help="Explicit BIN/PAN prefix (default: geo-coherent for country, or 414720)")
     p_bin.add_argument("-n", "--count", type=int, default=5)
     p_bin.add_argument("-m", "--month", default="12")
     p_bin.add_argument("-y", "--year", default="30")
     p_bin.add_argument("-f", "--format", choices=["pipe", "csv", "json"], default="pipe")
     p_bin.add_argument("--seed", type=int, default=None)
     p_bin.add_argument("--json", action="store_true")
+
+    # issuer
+    p_issuer = sub.add_parser("issuer", help="List and look up BIN/issuer metadata")
+    issuer_sub = p_issuer.add_subparsers(dest="subcommand", required=True)
+    p_il = issuer_sub.add_parser("list", help="List BINs/issuers, filtered")
+    p_il.add_argument("--network", help="Filter by card network (substring)")
+    p_il.add_argument("--country", help="Filter by issuing country (ISO code)")
+    p_il.add_argument("--issuer", help="Filter by issuer name (substring)")
+    p_il.add_argument("--json", action="store_true")
+    p_iu = issuer_sub.add_parser("lookup", help="Look up a BIN or PAN prefix")
+    p_iu.add_argument("query", help="BIN or PAN to resolve (e.g. 414720)")
+    p_iu.add_argument("--json", action="store_true")
+    p_id = issuer_sub.add_parser("default", help="Show the default BIN for a country")
+    p_id.add_argument("country", help="ISO country code (e.g. US)")
+    p_id.add_argument("--json", action="store_true")
 
     # doctor
     p_doc = sub.add_parser("doctor", help="Run system diagnostics")
@@ -563,6 +652,8 @@ def main() -> int:
             return cmd_fp(args)
         elif args.cmd == "bin":
             return cmd_bin(args)
+        elif args.cmd == "issuer":
+            return cmd_issuer(args)
         elif args.cmd == "doctor":
             return run_doctor(json_output=args.json)
         elif args.cmd == "selftest":

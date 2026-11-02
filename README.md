@@ -28,7 +28,6 @@ It generates geo-coherent synthetic identities, validates ISO/IEC 7812 Luhn fixt
 
 ### 2. 🛡️ For Defenders & Fraud Analysts
 * **Fraud Scoring & Rule Benchmarking:** Test how your fraud detection engine (e.g., Stripe Radar, Sift, custom rulesets) handles intentional geographic discrepancies (e.g., US billing address submitted from an Asian residential exit).
-* **WAF & Rate Limiting Verification:** Verify whether your bot management (Cloudflare, DataDome, Akamai) and API rate-limiters (Token Bucket / Leaky Bucket) trigger correctly under realistic browser TLS ClientHello signatures.
 * **Fingerprint Consistency Testing:** Audit your telemetry collectors against realistic Chrome, Firefox, and Safari TLS handshakes and matching `User-Agent` / `sec-ch-ua` headers.
 
 ### 3. 🧪 For QA & Test Engineers
@@ -70,7 +69,9 @@ forge doctor
 ## 💻 CLI Quickstart
 
 ### 1. Synthetic Identity Generation (`forge id`)
-Generate realistic, geo-coherent synthetic identities matching real regional formats:
+Generate realistic, geo-coherent synthetic identities matching real regional formats.
+Add `--card` to attach a matching card BIN (issuer + currency) so identity and card are
+geo-coherent out of the box.
 
 ```bash
 # Formatted terminal display
@@ -80,6 +81,10 @@ forge id --country ID
 
 # JSON output for automated scripting
 forge id --country US --json
+
+# Identity + geo-coherent card BIN/issuer/currency
+forge id --country BR --card
+forge id --country BR --card --json
 
 # Deterministic generation using a seed
 forge id --country US --seed 42 --json
@@ -93,8 +98,34 @@ forge fp
 forge fp --json
 ```
 
-### 3. Luhn ISO/IEC 7812 Card Fixtures (`forge bin`)
-Generate Luhn-compliant test card fixtures for QA and validator testing:
+### 3. BIN / Issuer Lookups (`forge issuer`)
+Query the BIN database: list issuers, filter by country/network/issuer, and resolve a BIN
+or PAN prefix to its issuer, currency, and card length.
+
+```bash
+# List all issuers
+forge issuer list
+
+# Filter by country
+forge issuer list --country ID
+forge issuer list --country US --json
+
+# Filter by network and issuer name (substring)
+forge issuer list --network Mastercard --issuer central
+
+# Resolve a BIN or full PAN to issuer metadata
+forge issuer lookup 521114
+forge issuer lookup 4147201111111111
+forge issuer lookup 378282 --json
+
+# Show the default BIN for a country
+forge issuer default BR
+```
+
+### 4. Luhn ISO/IEC 7812 Card Fixtures (`forge bin`)
+Generate Luhn-compliant test card fixtures for QA and validator testing. `--country` now
+auto-picks a geo-coherent BIN for that country (Mandiri for ID, Banco do Brasil for BR,
+Barclays for GB, etc.) so identities and cards match without manual BIN lookup.
 
 ```bash
 # Generate 5 test fixtures for Chase Visa BIN (414720) in pipe format (PAN|MM|YY|CVV)
@@ -102,9 +133,16 @@ forge bin --bin 414720 --count 5 --format pipe
 
 # Generate structured JSON fixtures
 forge bin --bin 517805 --count 10 --json
+
+# Auto-pick geo-coherent BIN by country
+forge bin --country ID --count 5
+forge bin --country BR --count 5 --json
+
+# Override the auto-picked BIN explicitly
+forge bin --country BR --bin 521114 --count 3  # BCA Mastercard instead of Banco do Brasil
 ```
 
-### 4. System Diagnostics & Self-Test (`forge doctor` & `forge selftest`)
+### 5. System Diagnostics & Self-Test (`forge doctor` & `forge selftest`)
 ```bash
 # Run environment health checks
 forge doctor
