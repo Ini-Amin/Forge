@@ -187,9 +187,6 @@ forge funnel --country US
 forge funnel --country BR --egress-country BR
 forge funnel --country JP --egress-country US --asn-type datacenter
 
-# State per-layer latencies in ms instead of letting the funnel assume defaults
-forge funnel --country US --latencies 15,45,120,210
-
 # Include Idempotency-Key header to test backend validation
 forge funnel --country US --idempotency
 
@@ -201,6 +198,12 @@ forge funnel --country JP --json
 egress you did not supply. No `--egress-country` means the geo check is scored
 `Egress country undetermined`, and an omitted `--asn-type` reads `unknown`
 rather than a clean residential line. Supply the values you actually measured.
+
+Latency is reported only when it was measured: `forge funnel` and the offline
+legs of `forge run` print `not measured`, because there is no live request to
+time. Only a live probe (`forge run --target ...`) produces a latency figure,
+and it can time just the edge request — backend, gateway and issuer stay
+`not measured`.
 
 ### 2. Currency Truncation & Precision Auditor (`forge currency`)
 Audit currency conversions against ISO 4217 zero-decimal (JPY, KRW, VND), three-decimal (KWD, BHD), and fractional cent rounding hazards:

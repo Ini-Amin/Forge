@@ -18,13 +18,13 @@ class LayerVerdict:
     verdict: str  # PASS, FLAG, BLOCK, CHALLENGE
     score_penalty: int
     details: list[str]
-    latency_ms: float
+    latency_ms: Optional[float] = None  # measured only; None = not measured
 
 
 @dataclass
 class FunnelSimulationResult:
     final_disposition: str  # SETTLED, CHALLENGE_3DS, REJECTED_BY_WAF, REJECTED_BY_BACKEND, REJECTED_BY_GATEWAY, REJECTED_BY_ISSUER
-    total_latency_ms: float
+    total_latency_ms: Optional[float]  # measured only; None = not measured
     total_risk_score: int
     layers: list[LayerVerdict]
     vulnerabilities_detected: list[str]
@@ -42,27 +42,23 @@ class TransactionFunnelSimulator:
         card_meta: dict[str, Any],
         egress_meta: dict[str, Any],
         tls_profile: dict[str, Any],
-        simulated_latencies: Optional[dict[str, float]] = None,
         stop_on_block: bool = False,
         probe: Optional[dict[str, Any]] = None,
     ) -> FunnelSimulationResult:
-        latencies = simulated_latencies or {
-            "edge": 15.0,
-            "backend": 45.0,
-            "gateway": 120.0,
-            "issuer": 210.0,
-        }
+        # Latency is a measurement, so it only exists when a live probe measured
+        # it. The one probe Forge makes (a single request from `run --target`)
+        # can measure the edge layer and nothing deeper, so backend/gateway/
+        # issuer layers are None here and the UI must say "not measured".
+        probe = probe or {}
+        measured_edge: Optional[float] = None
+        if probe.get("latency_ms") is not None:
+            measured_edge = float(probe["latency_ms"])
 
         layers: list[LayerVerdict] = []
         vulns: list[str] = []
         recs: list[str] = []
         total_risk = 0
         earliest_rejection: Optional[str] = None
-        layers: list[LayerVerdict] = []
-        vulns: list[str] = []
-        recs: list[str] = []
-        # Live probe result (status_code, latency_ms, headers) feeds layers 1-2 when present.
-        probe = probe or {}
         # ── Layer 1: Edge Layer (WAF / Bot Management) ─────────────────────────
         l1_details = []
         l1_penalty = 0
@@ -87,8 +83,6 @@ class TransactionFunnelSimulator:
             recs.append("Configure WAF JA4/TLS fingerprint consistency rule at the edge")
 
         if probe:
-            if probe.get("latency_ms") is not None:
-                latencies["edge"] = probe["latency_ms"]
             status = int(probe.get("status_code") or 0)
             resp_headers = {str(k).lower(): v for k, v in (probe.get("headers") or {}).items()}
             if status in (403, 429, 503):
@@ -97,7 +91,10 @@ class TransactionFunnelSimulator:
                 l1_details.append(f"Live probe: HTTP {status} rejected at edge ({signal})")
                 vulns.append(f"Edge visible behavior: HTTP {status} from {signal} (challenge/limiter engaged)")
             elif status > 0:
-                l1_details.append(f"Live probe: HTTP {status} passed through edge in {probe.get('latency_ms', 0):.1f}ms")
+                if measured_edge is not None:
+                    l1_details.append(f"Live probe: HTTP {status} passed through edge in {measured_edge:.1f}ms")
+                else:
+                    l1_details.append(f"Live probe: HTTP {status} passed through edge")
 
         if l1_penalty >= 50:
             l1_verdict = "BLOCK"
@@ -109,7 +106,7 @@ class TransactionFunnelSimulator:
             verdict=l1_verdict,
             score_penalty=l1_penalty,
             details=l1_details or ["Residential ASN with consistent TLS ClientHello; no live probe supplied"],
-            latency_ms=latencies["edge"],
+            latency_ms=measured_edge,
         ))
         total_risk += l1_penalty
 
@@ -118,7 +115,7 @@ class TransactionFunnelSimulator:
             if stop_on_block:
                 return FunnelSimulationResult(
                     final_disposition="REJECTED_BY_WAF",
-                    total_latency_ms=latencies["edge"],
+                    total_latency_ms=measured_edge,
                     total_risk_score=total_risk,
                     layers=layers,
                     vulnerabilities_detected=vulns,
@@ -160,7 +157,7 @@ class TransactionFunnelSimulator:
             verdict=l2_verdict,
             score_penalty=l2_penalty,
             details=l2_details or ["Schema valid; Idempotency-Key present; rate limit within bounds"],
-            latency_ms=latencies["backend"],
+            latency_ms=None,  # merchant backend latency was not measured
         ))
         total_risk += l2_penalty
 
@@ -169,7 +166,7 @@ class TransactionFunnelSimulator:
             if stop_on_block:
                 return FunnelSimulationResult(
                     final_disposition="REJECTED_BY_BACKEND",
-                    total_latency_ms=latencies["edge"] + latencies["backend"],
+                    total_latency_ms=measured_edge,
                     total_risk_score=total_risk,
                     layers=layers,
                     vulnerabilities_detected=vulns,
@@ -202,7 +199,7 @@ class TransactionFunnelSimulator:
             verdict=l3_verdict,
             score_penalty=l3_penalty,
             details=l3_details or ["AVS Full Match (Y); Geo-IP matches billing country; Radar score low"],
-            latency_ms=latencies["gateway"],
+            latency_ms=None,  # gateway latency was not measured
         ))
         total_risk += l3_penalty
 
@@ -211,7 +208,7 @@ class TransactionFunnelSimulator:
             if stop_on_block:
                 return FunnelSimulationResult(
                     final_disposition="REJECTED_BY_GATEWAY",
-                    total_latency_ms=sum(latencies[k] for k in ["edge", "backend", "gateway"]),
+                    total_latency_ms=measured_edge,
                     total_risk_score=total_risk,
                     layers=layers,
                     vulnerabilities_detected=vulns,
@@ -237,13 +234,11 @@ class TransactionFunnelSimulator:
             verdict=l4_verdict,
             score_penalty=l4_penalty,
             details=l4_details,
-            latency_ms=latencies["issuer"],
+            latency_ms=None,  # issuer latency was not measured
         ))
-        total_latency = sum(latencies.values())
-        final_disp = earliest_rejection or disposition
         return FunnelSimulationResult(
-            final_disposition=final_disp,
-            total_latency_ms=total_latency,
+            final_disposition=earliest_rejection or disposition,
+            total_latency_ms=measured_edge,
             total_risk_score=total_risk,
             layers=layers,
             vulnerabilities_detected=vulns,

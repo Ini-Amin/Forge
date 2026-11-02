@@ -416,21 +416,31 @@ def test_funnel_flags_unclassified_asn():
     assert any("unclassified" in d.lower() for d in layer1["details"])
 
 
-def test_funnel_uses_supplied_latencies():
-    """--latencies replaces the hardcoded defaults the funnel used to assume."""
-    r = subprocess.run([sys.executable, "forge.py", "funnel", "--country", "US",
-                        "--latencies", "5,50,150,250", "--json"],
+def test_funnel_offline_reports_no_latency():
+    """Offline, no layer latency may be printed. The funnel used to fabricate
+    per-layer defaults (15/45/120/210ms); a number with no probe behind it is
+    a claim, so every layer must read not-measured instead."""
+    r = subprocess.run([sys.executable, "forge.py", "funnel", "--country", "US", "--json"],
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-    lat = [l["latency_ms"] for l in json.loads(r.stdout)["layers"]]
-    assert lat == [5.0, 50.0, 150.0, 250.0]
+    data = json.loads(r.stdout)
+    assert data["total_latency_ms"] is None
+    assert all(l["latency_ms"] is None for l in data["layers"])
 
 
-def test_funnel_rejects_wrong_latency_count():
-    r = subprocess.run([sys.executable, "forge.py", "funnel", "--latencies", "1,2,3"],
-                       capture_output=True, text=True)
-    assert r.returncode != 0
-    assert "expected 4 comma-separated latencies" in r.stderr
+def test_funnel_probe_measures_edge_latency_only():
+    """The single live probe can time the edge request and nothing deeper, so
+    the edge verdict takes the measured value and the rest stay None."""
+    from forge.defenders.funnel import TransactionFunnelSimulator
+    res = TransactionFunnelSimulator.evaluate(
+        {}, {"country": "US", "name": "A", "address": "B", "zip": "1"},
+        {"country": "US"}, {"country": "US", "asn_type": "residential"},
+        {"impersonate": "chrome", "ua": "Chrome/120"},
+        probe={"status_code": 200, "latency_ms": 42.5},
+    )
+    assert res.layers[0].latency_ms == 42.5
+    assert all(l.latency_ms is None for l in res.layers[1:])
+    assert res.total_latency_ms == 42.5
 
 
 def test_running_the_suite_offline_is_fast():
