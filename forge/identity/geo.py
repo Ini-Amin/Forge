@@ -172,8 +172,11 @@ def id_nik(zip_code: str, rnd: Any = random, dob: Optional[str] = None, female: 
         yy = yy[2:]
         day = int(dd) + (40 if female else 0)
     else:
+        # Plausible adult birth year (never a future birthdate), matching
+        # generate_dob()'s 18-65 window.
+        year = rnd.randint(1961, 2008)
         day = rnd.randint(1, 28) + (40 if female else 0)
-        mm, yy = f"{rnd.randint(1, 12):02d}", f"{rnd.randint(0, 99):02d}"
+        mm, yy = f"{rnd.randint(1, 12):02d}", f"{year % 100:02d}"
     serial = f"{rnd.randint(1, 9999):04d}"
     return f"{prov}{reg}{dist}{day:02d}{mm}{yy}{serial}"
 

@@ -128,11 +128,17 @@ def make_fullz(country: str = "US", seed: Optional[int] = None) -> dict[str, Any
     if rnd.random() < 0.3:
         street += f" Apt {rnd.randint(1, 99)}{rnd.choice('ABCDEF')}"
 
+    email_domain = rnd.choice(["gmail.com", "yahoo.com", "outlook.com"])
+    email = f"{first.lower()}.{last.lower()}{rnd.randint(10, 99)}@{email_domain}"
+    phone = format_phone(g["phone_fmt"], geo_data["area"], rnd=rnd)
+
+    # DOB first so NIK's DDMMYY is derived from it (single draw, no dead retry).
+    dob = generate_dob(seed=seed)
     id_name = g.get("id_name", "national_id")
     if id_name == "ssn":
         nat_id = us_ssn(geo_data["state"], rnd=rnd)
     elif id_name == "nik":
-        nat_id = id_nik(zip_code, rnd=rnd)
+        nat_id = id_nik(zip_code, rnd=rnd, dob=dob, female=rnd.random() < 0.5)
     elif id_name == "my_number":
         nat_id = jp_my_number(rnd=rnd)
     elif id_name == "cpf":
@@ -141,13 +147,6 @@ def make_fullz(country: str = "US", seed: Optional[int] = None) -> dict[str, Any
         nat_id = uk_nino(rnd=rnd)
     else:
         nat_id = de_steuer(rnd=rnd)
-
-    email_domain = rnd.choice(["gmail.com", "yahoo.com", "outlook.com"])
-    email = f"{first.lower()}.{last.lower()}{rnd.randint(10, 99)}@{email_domain}"
-    phone = format_phone(g["phone_fmt"], geo_data["area"], rnd=rnd)
-    dob = generate_dob(seed=seed)
-    if id_name == "nik":
-        nat_id = id_nik(zip_code, rnd=rnd, dob=dob, female=rnd.random() < 0.5)
 
     identity = SyntheticIdentity(
         country=country,

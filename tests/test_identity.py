@@ -46,6 +46,35 @@ class TestIdentityGenerator(unittest.TestCase):
         self.assertGreaterEqual(len(p), 16)
         self.assertTrue(any(ch in "!@#$%^&*-_" for ch in p))
 
+    def test_nik_ddmmyy_matches_dob(self):
+        """NIK digits 7-12 are DDMMYY from the identity's DOB, not a constant."""
+        seen = set()
+        for seed in range(40):
+            fz = make_fullz("ID", seed=seed)
+            nik, dob = fz["nik"], fz["dob"]
+            self.assertEqual(len(nik), 16)
+            mm, dd, yy = dob.split("/")
+            dd_i = int(dd)
+            # Female NIK adds 40 to the day.
+            for day in (dd_i, dd_i + 40):
+                if f"{day:02d}{mm}{yy[2:]}" == nik[6:12]:
+                    break
+            else:
+                self.fail(f"NIK DDMMYY {nik[6:12]} does not match dob {dob}")
+            seen.add(nik[8:12])
+        self.assertGreater(len(seen), 10, "MM+YY should vary across seeds")
+
+    def test_nik_without_dob_is_adult(self):
+        """Fallback NIK path must not mint future birth years."""
+        from forge.identity.geo import id_nik
+        import random as _random
+        rnd = _random.Random(7)
+        for _ in range(50):
+            yy = int(id_nik("40111", rnd=rnd)[10:12])
+            year = 2000 + yy if yy <= 8 else 1900 + yy
+            self.assertGreaterEqual(year, 1961)
+            self.assertLessEqual(year, 2026)
+
 
 if __name__ == "__main__":
     unittest.main()
