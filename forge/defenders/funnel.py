@@ -8,7 +8,7 @@ Models and audits the 4 defensive layers of an e-commerce checkout flow:
 """
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
 
@@ -22,13 +22,52 @@ class LayerVerdict:
 
 
 @dataclass
+class StageVerdict:
+    stage: str
+    verdict: str  # PASS, DEFERRED, BLOCK, N_A
+    detail: str
+
+
+def _build_money_lifecycle(final_disposition: str, funding: str) -> list[StageVerdict]:
+    """Trace money movement stages for a transaction outcome.
+
+    Verdicts are derived only from the disposition and the card funding type;
+    no rates, amounts, or date arithmetic are claimed.
+    """
+    if final_disposition == "AUTHORIZED":
+        return [
+            StageVerdict("authorization", "PASS",
+                         "Approved at issuer layer (risk gate passed) — authorization only, no funds moved"),
+            StageVerdict("clearing", "PASS", "Routable for clearing batch submission"),
+            StageVerdict("settlement", *_settlement_verdict(funding)),
+        ]
+    auth_verdict = "BLOCK" if final_disposition.startswith("REJECTED_BY_") else "N_A"
+    return [
+        StageVerdict("authorization", auth_verdict, final_disposition),
+        StageVerdict("clearing", "N_A", f"Never reached — {final_disposition}"),
+        StageVerdict("settlement", "N_A", f"Never reached — {final_disposition}"),
+    ]
+
+
+def _settlement_verdict(funding: str) -> tuple[str, str]:
+    """Return (verdict, detail) for the settlement stage of an authorized transaction."""
+    by_funding = {
+        "credit": ("DEFERRED", "Credit line — funds move after the capture window; not settled at approval"),
+        "debit": ("PASS", "Debit card — settles in the same-day batch"),
+        "prepaid": ("PASS", "Prepaid — balance deducted at capture"),
+    }
+    return by_funding.get(funding.lower(), ("N_A", "Funding type unknown — settlement timing not claimed"))
+
+
+@dataclass
 class FunnelSimulationResult:
-    final_disposition: str  # SETTLED, CHALLENGE_3DS, REJECTED_BY_WAF, REJECTED_BY_BACKEND, REJECTED_BY_GATEWAY, REJECTED_BY_ISSUER
+    final_disposition: str  # AUTHORIZED, CHALLENGE_3DS, REJECTED_BY_WAF, REJECTED_BY_BACKEND, REJECTED_BY_GATEWAY, REJECTED_BY_ISSUER
     total_latency_ms: Optional[float]  # measured only; None = not measured
     total_risk_score: int
     layers: list[LayerVerdict]
     vulnerabilities_detected: list[str]
     recommendations: list[str]
+    money_lifecycle: list[StageVerdict] = field(default_factory=list)
 
 
 class TransactionFunnelSimulator:
@@ -120,6 +159,7 @@ class TransactionFunnelSimulator:
                     layers=layers,
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
+                    money_lifecycle=_build_money_lifecycle("REJECTED_BY_WAF", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 2: Merchant App (API Backend) ────────────────────────────────
@@ -171,6 +211,7 @@ class TransactionFunnelSimulator:
                     layers=layers,
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
+                    money_lifecycle=_build_money_lifecycle("REJECTED_BY_BACKEND", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 3: Gateway (Fraud Scoring / AVS) ─────────────────────────────
@@ -213,6 +254,7 @@ class TransactionFunnelSimulator:
                     layers=layers,
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
+                    money_lifecycle=_build_money_lifecycle("REJECTED_BY_GATEWAY", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 4: Issuer (EMVCo 3DS Evaluation) ─────────────────────────────
@@ -227,7 +269,7 @@ class TransactionFunnelSimulator:
         else:
             l4_verdict = "PASS"
             l4_details.append(f"Low risk score ({total_accumulated}) eligible for 3DS Frictionless settlement")
-            disposition = "SETTLED"
+            disposition = "AUTHORIZED"
 
         layers.append(LayerVerdict(
             layer_name="4. Issuer / 3DS",
@@ -243,4 +285,6 @@ class TransactionFunnelSimulator:
             layers=layers,
             vulnerabilities_detected=vulns,
             recommendations=recs,
+            money_lifecycle=_build_money_lifecycle(
+                earliest_rejection or disposition, card_meta.get("funding", "unknown")),
         )

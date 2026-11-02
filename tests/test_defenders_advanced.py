@@ -22,11 +22,48 @@ class TestAdvancedDefenders(unittest.TestCase):
         }
 
         res = TransactionFunnelSimulator.evaluate(headers, identity, card_meta, egress_meta, tls_profile)
-        self.assertEqual(res.final_disposition, "SETTLED")
+        self.assertEqual(res.final_disposition, "AUTHORIZED")
         self.assertEqual(res.total_risk_score, 0)
         self.assertEqual(len(res.layers), 4)
         for l in res.layers:
             self.assertEqual(l.verdict, "PASS")
+        self.assertEqual(len(res.money_lifecycle), 3)
+        stages = [s["stage"] if isinstance(s, dict) else s.stage for s in res.money_lifecycle]
+        self.assertEqual(stages, ["authorization", "clearing", "settlement"])
+        # funding unknown -> settlement truthfully unclaimed
+        self.assertEqual(res.money_lifecycle[2].verdict, "N_A")
+
+    def _run_clean_funnel(self, card_meta):
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0",
+                   "Idempotency-Key": "test_uuid_123"}
+        identity = {"country": "US", "name": "John Doe", "address": "123 Main St", "zip": "10001"}
+        egress = {"country": "US", "asn_type": "residential"}
+        tls = {"impersonate": "firefox135",
+               "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"}
+        return TransactionFunnelSimulator.evaluate(headers, identity, card_meta, egress, tls)
+
+    def test_funnel_lifecycle_credit_settlement_deferred(self):
+        card = {"country": "US", "issuer": "Chase", "funding": "credit"}
+        res = self._run_clean_funnel(card_meta=card)
+        self.assertEqual(res.final_disposition, "AUTHORIZED")
+        self.assertEqual(res.money_lifecycle[2].verdict, "DEFERRED")
+        self.assertIn("not settled", res.money_lifecycle[2].detail)
+
+    def test_funnel_lifecycle_prepaid_settlement_passes(self):
+        card = {"country": "US", "issuer": "Chase", "funding": "prepaid"}
+        res = self._run_clean_funnel(card_meta=card)
+        self.assertEqual(res.money_lifecycle[2].verdict, "PASS")
+
+    def test_funnel_lifecycle_rejected_never_reaches_clearing(self):
+        # datacenter ASN (35 pts) + UA/TLS mismatch (50 pts) forces L1 BLOCK
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"}
+        tls = {"impersonate": "chrome136", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/136.0.0.0 Safari/537.36"}
+        res = TransactionFunnelSimulator.evaluate(
+            headers, {"country": "US", "name": "John Doe", "address": "a", "zip": "10001"},
+            {"country": "US", "funding": "credit"}, {"country": "US", "asn_type": "datacenter"}, tls)
+        self.assertEqual(res.final_disposition, "REJECTED_BY_WAF")
+        self.assertEqual(res.money_lifecycle[1].verdict, "N_A")
+        self.assertIn("Never reached", res.money_lifecycle[1].detail)
 
     def test_funnel_simulator_vulnerabilities(self):
         # Missing Idempotency-Key + Mismatched UA/TLS
