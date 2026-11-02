@@ -154,15 +154,24 @@ def us_ssn(state: str, rnd: Any = random) -> str:
     return f"{area:03d}-{rnd.randint(1, 99):02d}-{rnd.randint(1, 9999):04d}"
 
 
-def id_nik(zip_code: str, rnd: Any = random) -> str:
-    """Indonesian NIK: 16 digits, starts with province/regency codes + birthdate."""
-    prov = rnd.choice({"10110": "31", "40111": "32", "80111": "51"}.get(zip_code, "31"))
+def id_nik(zip_code: str, rnd: Any = random, dob: Optional[str] = None, female: bool = False) -> str:
+    """Indonesian NIK (16 digit): PP KK CC DDMMYY SSSS.
+
+    PP=province, KK=regency, CC=district codes; DDMMYY=birthdate (female: day+40);
+    SSSS=registration serial (>=1).
+    """
+    prov = {"10110": "31", "40111": "32", "80111": "51"}.get(zip_code, "31")
     reg = f"{rnd.randint(1, 75):02d}"
-    d = rnd.randint(1, 28) + (40 if rnd.random() < 0.5 else 0)
-    mm = rnd.randint(1, 12)
-    yy = rnd.randint(0, 99)
+    dist = f"{rnd.randint(1, 57):02d}"
+    if dob:
+        mm, dd, yy = dob.split("/")
+        yy = yy[2:]
+        day = int(dd) + (40 if female else 0)
+    else:
+        day = rnd.randint(1, 28) + (40 if female else 0)
+        mm, yy = f"{rnd.randint(1, 12):02d}", f"{rnd.randint(0, 99):02d}"
     serial = f"{rnd.randint(1, 9999):04d}"
-    return f"{prov}{reg}{d:02d}{mm:02d}{yy:02d}{serial}"
+    return f"{prov}{reg}{dist}{day:02d}{mm}{yy}{serial}"
 
 
 def jp_my_number(rnd: Any = random) -> str:

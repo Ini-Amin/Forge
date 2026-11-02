@@ -146,6 +146,8 @@ def make_fullz(country: str = "US", seed: Optional[int] = None) -> dict[str, Any
     email = f"{first.lower()}.{last.lower()}{rnd.randint(10, 99)}@{email_domain}"
     phone = format_phone(g["phone_fmt"], geo_data["area"], rnd=rnd)
     dob = generate_dob(seed=seed)
+    if id_name == "nik":
+        nat_id = id_nik(zip_code, rnd=rnd, dob=dob, female=rnd.random() < 0.5)
 
     identity = SyntheticIdentity(
         country=country,

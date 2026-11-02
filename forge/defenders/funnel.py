@@ -44,6 +44,7 @@ class TransactionFunnelSimulator:
         tls_profile: dict[str, Any],
         simulated_latencies: Optional[dict[str, float]] = None,
         stop_on_block: bool = False,
+        probe: Optional[dict[str, Any]] = None,
     ) -> FunnelSimulationResult:
         latencies = simulated_latencies or {
             "edge": 15.0,
@@ -57,6 +58,11 @@ class TransactionFunnelSimulator:
         recs: list[str] = []
         total_risk = 0
         earliest_rejection: Optional[str] = None
+        layers: list[LayerVerdict] = []
+        vulns: list[str] = []
+        recs: list[str] = []
+        # Live probe result (status_code, latency_ms, headers) feeds layers 1-2 when present.
+        probe = probe or {}
         # ── Layer 1: Edge Layer (WAF / Bot Management) ─────────────────────────
         l1_details = []
         l1_penalty = 0
@@ -75,6 +81,19 @@ class TransactionFunnelSimulator:
             l1_details.append(f"WAF Anomaly: UA claims Firefox but TLS ClientHello is {impersonate}")
             vulns.append("WAF rule missing: Failed to drop mismatched TLS ClientHello / User-Agent")
             recs.append("Configure WAF JA4/TLS fingerprint consistency rule at the edge")
+
+        if probe:
+            if probe.get("latency_ms") is not None:
+                latencies["edge"] = probe["latency_ms"]
+            status = int(probe.get("status_code") or 0)
+            resp_headers = {str(k).lower(): v for k, v in (probe.get("headers") or {}).items()}
+            if status in (403, 429, 503):
+                signal = resp_headers.get("cf-mitigated") or resp_headers.get("server") or "edge"
+                l1_penalty += 60
+                l1_details.append(f"Live probe: HTTP {status} rejected at edge ({signal})")
+                vulns.append(f"Edge visible behavior: HTTP {status} from {signal} (challenge/limiter engaged)")
+            elif status > 0:
+                l1_details.append(f"Live probe: HTTP {status} passed through edge in {probe.get('latency_ms', 0):.1f}ms")
 
         if l1_penalty >= 50:
             l1_verdict = "BLOCK"
@@ -120,6 +139,12 @@ class TransactionFunnelSimulator:
         if missing_fields:
             l2_penalty += 30
             l2_details.append(f"Incomplete billing schema: missing {', '.join(missing_fields)}")
+
+        if probe:
+            status = int(probe.get("status_code") or 0)
+            if 400 <= status < 500 and status not in (403, 429):
+                l2_penalty += 30
+                l2_details.append(f"Live probe: HTTP {status} rejected by application layer (schema/auth/validation)")
 
         if l2_penalty >= 50:
             l2_verdict = "BLOCK"

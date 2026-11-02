@@ -212,6 +212,7 @@ def cmd_run(a: argparse.Namespace) -> int:
             active_proxy = None if is_private else proxy_url
             strict = not is_private
             route_label = "direct internal target" if is_private else "via verified proxy"
+            probe_result = None
             try:
                 start_t = time.monotonic()
                 with TLSSession(active_proxy, strict_proxy=strict) as s:
@@ -222,6 +223,7 @@ def cmd_run(a: argparse.Namespace) -> int:
                         r = s.get(target, timeout=10.0, headers=hdrs)
                 dur = (time.monotonic() - start_t) * 1000.0
                 st_code = r.status_code
+                probe_result = {"status_code": st_code, "latency_ms": dur, "headers": dict(r.headers)}
                 status_badge = ok(f"HTTP {st_code}") if st_code < 400 else bad(f"HTTP {st_code}")
                 print(f"      Target   : {target} [{method}] ({route_label})")
                 print(f"      Response : {status_badge} ({len(r.content)} bytes in {dur:.1f}ms)")
@@ -233,7 +235,7 @@ def cmd_run(a: argparse.Namespace) -> int:
     print(bold("\n  [4/5] 4-LAYER TRANSACTION FUNNEL SIMULATION"))
     bin_ = getattr(a, "bin", None) or get_default_bin_for_country(country)
     card_meta = issuer_lookup(bin_)
-    funnel = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof)
+    funnel = TransactionFunnelSimulator.evaluate(hdrs, fz, card_meta, exit_meta, prof, probe=probe_result if target else None)
 
     for l in funnel.layers:
         v_icon = ok("✔") if l.verdict == "PASS" else (warn("!") if l.verdict == "FLAG" else bad("✘"))
@@ -293,7 +295,8 @@ def cmd_audit_risk(a: argparse.Namespace) -> int:
     fz = make_fullz(country)
     bin_ = a.bin if (getattr(a, "bin", None) and a.bin != "414720") else get_default_bin_for_country(country)
     card_meta = issuer_lookup(bin_)
-    exit_meta = {"country": px.get("country", country) if px else ""}
+    px = matching_proxy(fz)
+    exit_meta = {"country": px.get("country", country) if px else "", "asn_type": "residential"}
     prof = get_impersonate_profile()
 
     audit = FraudRiskAuditor.full_audit(fz, card_meta, exit_meta, prof)
