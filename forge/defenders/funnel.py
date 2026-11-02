@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict, List, Optional
 
+from forge.payments.state_machine import PaymentStateMachine
+
 
 @dataclass
 class LayerVerdict:
@@ -68,6 +70,7 @@ class FunnelSimulationResult:
     vulnerabilities_detected: list[str]
     recommendations: list[str]
     money_lifecycle: list[StageVerdict] = field(default_factory=list)
+    rails_state: str = "unknown"
 
 
 class TransactionFunnelSimulator:
@@ -160,6 +163,7 @@ class TransactionFunnelSimulator:
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
                     money_lifecycle=_build_money_lifecycle("REJECTED_BY_WAF", card_meta.get("funding", "unknown")),
+                    rails_state=PaymentStateMachine.rails_state("REJECTED_BY_WAF", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 2: Merchant App (API Backend) ────────────────────────────────
@@ -212,6 +216,7 @@ class TransactionFunnelSimulator:
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
                     money_lifecycle=_build_money_lifecycle("REJECTED_BY_BACKEND", card_meta.get("funding", "unknown")),
+                    rails_state=PaymentStateMachine.rails_state("REJECTED_BY_BACKEND", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 3: Gateway (Fraud Scoring / AVS) ─────────────────────────────
@@ -255,6 +260,7 @@ class TransactionFunnelSimulator:
                     vulnerabilities_detected=vulns,
                     recommendations=recs,
                     money_lifecycle=_build_money_lifecycle("REJECTED_BY_GATEWAY", card_meta.get("funding", "unknown")),
+                    rails_state=PaymentStateMachine.rails_state("REJECTED_BY_GATEWAY", card_meta.get("funding", "unknown")),
                 )
 
         # ── Layer 4: Issuer (EMVCo 3DS Evaluation) ─────────────────────────────
@@ -286,5 +292,7 @@ class TransactionFunnelSimulator:
             vulnerabilities_detected=vulns,
             recommendations=recs,
             money_lifecycle=_build_money_lifecycle(
+                earliest_rejection or disposition, card_meta.get("funding", "unknown")),
+            rails_state=PaymentStateMachine.rails_state(
                 earliest_rejection or disposition, card_meta.get("funding", "unknown")),
         )

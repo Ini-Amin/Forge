@@ -13,6 +13,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
+from forge.payments.decline_codes import DeclineAnalysis, DeclineCodeTaxonomy
+
 
 @dataclass
 class NextActionInspection:
@@ -37,6 +39,37 @@ class PaymentStateMachine:
         "succeeded",
         "canceled",
     }
+
+    # Card-rail vocabulary for a transaction snapshot. The snapshot is taken at
+    # authorization time, so it never propagates a card past "authorized".
+    RAIL_STATES: tuple = ("authorized", "captured", "cleared", "settled", "action_required", "failed")
+
+    @classmethod
+    def rails_state(cls, final_disposition: str, funding: str = "") -> str:
+        """Map a funnel final disposition to a card-rail state.
+
+        Exact precedence:
+          "AUTHORIZED"               -> "authorized"  (snapshot; funding is NOT consulted)
+          "CHALLENGE_3DS"            -> "action_required"
+          startswith("REJECTED_BY_") -> "failed"
+          anything else              -> "unknown"
+        funding is accepted because the funnel calls with it, but it must never
+        change the result — capture/clearing/settlement happen after the snapshot.
+        """
+        if final_disposition == "AUTHORIZED":
+            return "authorized"
+        if final_disposition == "CHALLENGE_3DS":
+            return "action_required"
+        if final_disposition.startswith("REJECTED_BY_"):
+            return "failed"
+        return "unknown"
+
+    @classmethod
+    def state_for_decline(cls, analysis: DeclineAnalysis) -> str:
+        """Map a decline analysis category to a card-rail state."""
+        if analysis.category == DeclineCodeTaxonomy.CAT_SCA:
+            return "action_required"
+        return "failed"
 
     @staticmethod
     def parse_next_action(next_action: dict[str, Any]) -> NextActionInspection:

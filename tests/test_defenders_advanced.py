@@ -65,6 +65,20 @@ class TestAdvancedDefenders(unittest.TestCase):
         self.assertEqual(res.money_lifecycle[1].verdict, "N_A")
         self.assertIn("Never reached", res.money_lifecycle[1].detail)
 
+    def test_funnel_clean_rails_state(self):
+        res = self._run_clean_funnel({"country": "US", "issuer": "Chase", "funding": "credit"})
+        self.assertEqual(res.rails_state, "authorized")
+
+    def test_funnel_blocked_rails_state(self):
+        # Same fixture as test_funnel_lifecycle_rejected_never_reaches_clearing:
+        # datacenter ASN + UA/TLS mismatch force an L1 BLOCK.
+        headers = {"User-Agent": "Mozilla/5.0 ... Firefox/135.0"}
+        tls = {"impersonate": "chrome136", "ua": "Mozilla/5.0 ... Chrome/136.0.0.0 Safari/537.36"}
+        res = TransactionFunnelSimulator.evaluate(
+            headers, {"country": "US", "name": "John Doe", "address": "a", "zip": "10001"},
+            {"country": "US", "funding": "credit"}, {"country": "US", "asn_type": "datacenter"}, tls)
+        self.assertEqual(res.rails_state, "failed")
+
     def test_funnel_simulator_vulnerabilities(self):
         # Missing Idempotency-Key + Mismatched UA/TLS
         headers = {

@@ -68,6 +68,20 @@ class TestPaymentsAndDefenders(unittest.TestCase):
         self.assertFalse(eval_res["is_terminal"])
         self.assertTrue(eval_res["next_action"]["is_3ds"])
 
+    def test_rails_state_mapping(self):
+        sm = PaymentStateMachine
+        self.assertEqual(sm.rails_state("AUTHORIZED", "credit"), "authorized")
+        self.assertEqual(sm.rails_state("AUTHORIZED", "prepaid"), "authorized")  # snapshot, never beyond
+        self.assertEqual(sm.rails_state("CHALLENGE_3DS"), "action_required")
+        self.assertEqual(sm.rails_state("REJECTED_BY_GATEWAY"), "failed")
+
+    def test_rails_state_from_decline(self):
+        sm = PaymentStateMachine
+        from forge.payments.decline_codes import DeclineCodeTaxonomy as DCT
+        self.assertEqual(sm.state_for_decline(DCT.analyze("stolen_card")), "failed")
+        self.assertEqual(sm.state_for_decline(DCT.analyze("authentication_required")), "action_required")
+        self.assertEqual(sm.state_for_decline(DCT.analyze("insufficient_funds")), "failed")
+
     def test_idempotency_headers(self):
         mgr = IdempotencyManager()
         h1 = mgr.get_headers(endpoint="/v1/payment_intents")
