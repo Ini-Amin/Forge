@@ -640,6 +640,7 @@ def cmd_lifecycle(a: argparse.Namespace) -> int:
             "audit": [record.__dict__ for record in result.history],
             "currency": currency,
             "expected_units": result.converted_units_expected,
+            "events": [record.__dict__ for record in result.history],
         }, indent=2))
         return 0
 
@@ -666,9 +667,13 @@ def cmd_lifecycle(a: argparse.Namespace) -> int:
 def cmd_reconcile(a: argparse.Namespace) -> int:
     try:
         internal = events_from_file(a.internal)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        print(bad(f"Cannot read --internal events file {a.internal}: {e}"))
+        return 1
+    try:
         external = events_from_file(a.external)
-    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
-        print(bad(f"Cannot read events file: {e}"))
+    except (OSError, json.JSONDecodeError, KeyError, TypeError, ValueError) as e:
+        print(bad(f"Cannot read --external events file {a.external}: {e}"))
         return 1
     if not isinstance(internal, list) or not isinstance(external, list):
         print(bad("'events' must be a list in both files"))

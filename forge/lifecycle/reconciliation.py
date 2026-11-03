@@ -84,4 +84,7 @@ def reconcile(internal: list[dict], external: list[dict]) -> ReconciliationRepor
 def events_from_file(path: str) -> list[dict]:
     with open(path, "r", encoding="utf-8") as fh:
         data = json.load(fh)
-    return data["events"]
+    events = data["events"]
+    if isinstance(events, list) and not all(isinstance(event, dict) for event in events):
+        raise ValueError("'events' must contain only JSON objects")
+    return events

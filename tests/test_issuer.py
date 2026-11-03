@@ -588,6 +588,28 @@ def test_lifecycle_cli_bad_amount_rejected(tmp_path):
     assert "only $1.00" in data["audit"][1]["reason"]
 
 
+def test_lifecycle_json_round_trips_into_reconcile_internal(tmp_path):
+    """`forge lifecycle --json` emits an event-list export usable as --internal:
+    its `events` key feeds straight into `forge reconcile --internal`."""
+    f = tmp_path / "happy.json"
+    out_f = tmp_path / "out.json"
+    f.write_text(json.dumps(HAPPY_FILE))
+    r = subprocess.run([sys.executable, "forge.py", "lifecycle", "--events", str(f), "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    out_f.write_text(r.stdout)
+    r2 = subprocess.run([sys.executable, "forge.py", "reconcile",
+                         "--internal", str(out_f), "--external", str(f), "--json"],
+                        capture_output=True, text=True)
+    assert r2.returncode == 0, r2.stderr
+    data = json.loads(r2.stdout)
+    assert data["counts"]["match"] == 6
+    assert data["mismatches"] == 0
+    assert data["missing_external"] == 0
+    assert data["unexpected_external"] == 0
+    assert all(row["diffs"] == [] for row in data["rows"])
+
+
 def test_reconcile_cli(tmp_path):
     int_f = tmp_path / "internal.json"
     ext_f = tmp_path / "external.json"
