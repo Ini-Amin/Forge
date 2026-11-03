@@ -62,7 +62,7 @@
     returning `(ok, reason)`, where `remaining_units` = run's expected $1 minor units minus the sum of applied capture amounts (computed by the engine). Guards: `eligible_auth` (auth == AUTHORIZED and `remaining_units > 0`, reason includes "eligible authorization" or "remaining must be positive"); `clearing_eligible` (capture == CAPTURED); `settlement_eligible` (clearing == CLEARED).
   - `forge.lifecycle.rates.COUNTRY_CURRENCY: dict[str, str]` = `{"US": "USD", "JP": "JPY", "DE": "EUR", "GB": "GBP", "ID": "IDR"}`
   - `forge.lifecycle.rates.RATES: dict[str, str]` = `{"USD": "1.00", "JPY": "150.00", "EUR": "0.92", "GBP": "0.79", "IDR": "15500.00"}` (amount of currency per $1.00)
-  - `forge.lifecycle.rates.converted_units(currency: str) -> int`: minor units of $1.00 in `currency`, via `RATES` × `CurrencyPrecisionAuditor.audit_amount_to_units`. USD → 100, JPY → 150, EUR → 92, GBP → 79, IDR → 15500. Unknown currency raises `ValueError`.
+  - `forge.lifecycle.rates.converted_units(currency: str) -> int`: minor units of $1.00 in `currency`, via `RATES` × `CurrencyPrecisionAuditor.audit_amount_to_units`. USD → 100, JPY → 150, EUR → 92, GBP → 79, IDR → 1550000 (IDR is two-decimal per ISO 4217 — the existing auditor's behavior is correct and must not be bent). Unknown currency raises `ValueError`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -76,7 +76,7 @@ class TestRates(unittest.TestCase):
         self.assertEqual(converted_units("JPY"), 150)   # zero-decimal: 150 yen, not 15000
         self.assertEqual(converted_units("EUR"), 92)
         self.assertEqual(converted_units("GBP"), 79)
-        self.assertEqual(converted_units("IDR"), 15500)  # zero-decimal
+        self.assertEqual(converted_units("IDR"), 1550000)  # two-decimal per ISO 4217 — see ruling Q1
 
     def test_converted_units_unknown_currency_raises(self):
         from forge.lifecycle.rates import converted_units
@@ -108,7 +108,7 @@ Expected: FAIL — `ModuleNotFoundError: forge.lifecycle` / missing attributes.
 
 - [ ] **Step 3: Implement `forge/lifecycle/rates.py`, `forge/lifecycle/state.py`, `forge/lifecycle/__init__.py`**
 
-`rates.py`: the two dicts verbatim + `converted_units` using `RATES` and `CurrencyPrecisionAuditor.audit_amount_to_units(currency, amount).expected_integer_units`. Handle zero-decimal (JPY/IDR) via the auditor — do not special-case.
+`rates.py`: the two dicts verbatim + `converted_units` using `RATES` and `CurrencyPrecisionAuditor.audit_amount_to_units(currency, amount).expected_integer_units`. The auditor handles ISO 4217 (JPY zero-decimal, IDR two-decimal) — do not special-case either; do not modify the auditor's currency sets.
 `state.py`: `Transition` frozen dataclass, the `TRANSITIONS` tuple verbatim, `find_transition`, `evaluate_guard`.
 `__init__.py`: export the public names above.
 
