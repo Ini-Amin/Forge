@@ -87,3 +87,35 @@ class TestEngine(unittest.TestCase):
         res = LifecycleEngine(events).run()
         self.assertEqual(res.history[1].result, "rejected")
         self.assertIn("unknown", res.history[1].reason)
+
+
+class TestAggregate(unittest.TestCase):
+    def test_settled_aggregate(self):
+        from forge.lifecycle.aggregate import build_aggregate
+        tracks = {"authorization": "AUTHORIZED", "capture": "CAPTURED", "clearing": "CLEARED", "settlement": "SETTLED"}
+        a = build_aggregate(tracks)
+        self.assertTrue(a.is_settled)
+        self.assertFalse(a.failed)
+        self.assertFalse(a.needs_handling)
+        self.assertEqual(a.summary, "settled")
+
+    def test_settlement_failed_is_needs_handling_not_failed(self):
+        from forge.lifecycle.aggregate import build_aggregate
+        tracks = {"authorization": "AUTHORIZED", "capture": "CAPTURED", "clearing": "CLEARED", "settlement": "SETTLEMENT_FAILED"}
+        a = build_aggregate(tracks)
+        self.assertTrue(a.needs_handling)
+        self.assertFalse(a.failed)
+        self.assertEqual(a.summary, "needs_handling")
+
+    def test_declined_is_failed(self):
+        from forge.lifecycle.aggregate import build_aggregate
+        tracks = {"authorization": "DECLINED", "capture": None, "clearing": None, "settlement": None}
+        a = build_aggregate(tracks)
+        self.assertTrue(a.failed)
+        self.assertEqual(a.summary, "declined")
+
+    def test_furthest_reached_when_not_terminal(self):
+        from forge.lifecycle.aggregate import build_aggregate
+        tracks = {"authorization": "AUTHORIZED", "capture": "CAPTURED", "clearing": "CLEARING_PENDING", "settlement": None}
+        a = build_aggregate(tracks)
+        self.assertEqual(a.summary, "clearing_pending")
