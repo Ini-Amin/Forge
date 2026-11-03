@@ -1,7 +1,7 @@
 # Forge Lifecycle: event-driven per-track state machine + reconciliation
 
 Date: 2026-11-03
-Status: proposed (awaiting approval)
+Status: implemented — Phase 1 landed 2026-11-03 (Phases 2-3 deferred)
 Size: project — Phase 1 MVP (execution authorized), Phase 2-3 deferred
 
 ## Why

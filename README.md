@@ -238,7 +238,56 @@ at capture). `forge funnel --json` adds `money_lifecycle` (per-stage
 verdicts) and `rails_state` (`authorized`, `action_required`, `failed`,
 `unknown`).
 
-### 2. Currency Truncation & Precision Auditor (`forge currency`)
+### 2. Forge Lifecycle Simulator (`forge lifecycle`)
+Event-driven per-track simulator for what happens *after* the authorization
+decision: capture, clearing, settlement. Mock-only, offline, and never inferred
+— success on one track never advances another; every state change comes from an
+explicit event in your file, applied in file order. Unlike `forge funnel` (a
+snapshot at auth time), this simulates the post-auth pipeline.
+
+```bash
+# Simulate a run from an explicit event file ({"events": [...]})
+forge lifecycle --events events.json --json
+
+# Diff two event files by event_id (input fields only; never mutates state)
+forge reconcile --internal internal.json --external external.json --json
+```
+
+The $1 mock rule: the base amount is always `$1.00` USD (`amount_units: 100`).
+Any other base amount is rejected with the reason in the audit trail. With
+`--country` (default `US`; `US/JP/DE/GB/ID`), the $1 converts through an
+explicit fixture rate table in `forge/lifecycle/rates.py` — never a runtime-
+invented FX rate, and the converted values below are fixture units, not live
+quotes: USD $1.00 → 100 minor units; JPY ¥150 → 150 units (zero-decimal);
+EUR €0.92 → 92; GBP £0.79 → 79; IDR Rp15,500.00 → 1,550,000 (two-decimal per
+ISO 4217). A file must not mix currencies; all events in a run share the run's
+target currency.
+
+Active tracks (Phase 1), each advancing independently:
+Authorization (`PENDING → AUTHORIZED | DECLINED`),
+Capture (`CAPTURED`),
+Clearing (`CLEARING_PENDING → CLEARED | CLEARING_FAILED`),
+Settlement (`SETTLEMENT_PENDING → SETTLED | SETTLEMENT_FAILED`).
+Guards cross-check tracks (e.g. `settlement.accepted` requires Clearing
+`CLEARED`); an invalid transition is recorded `rejected` with an auditable
+reason and other tracks are untouched. Absent optional-track events mean no
+events for that track — never a fabricated transition.
+
+`SETTLED` is terminal only within the Settlement track — it is not a global
+"transaction finished" flag. `CLEARING_FAILED` / `SETTLEMENT_FAILED` mean
+handling is needed, not that "the transaction failed".
+
+Phase 2 tracks (Reversal, Dispute, Refund) are vocabulary-only in Phase 1:
+their state names are declared, but their events are rejected as
+`track <name> inactive in phase 1` — not `unknown`. Nothing about a dispute,
+refund, or reversal is simulated yet.
+
+`forge reconcile` (Phase 1) compares two event files by `event_id` and diffs
+input fields only (`type`, `occurred_at`, `amount_units`, `currency`), reporting
+`match` / `mismatch` / `missing_external` / `unexpected_external`. It never
+writes to lifecycle event history and is not blocked by absent optional events.
+
+### 3. Currency Truncation & Precision Auditor (`forge currency`)
 Audit currency conversions against ISO 4217 zero-decimal (JPY, KRW, VND), three-decimal (KWD, BHD), and fractional cent rounding hazards:
 
 ```bash
@@ -249,7 +298,7 @@ forge currency --currency JPY --amount 1500
 forge currency --currency USD --edge-cases
 ```
 
-### 3. Defense Maturity Scorecard (`forge maturity`)
+### 4. Defense Maturity Scorecard (`forge maturity`)
 Scores a defence run from numbers you measured. The command has no built-in
 figures — without `--tp/--tn/--fp/--fn` and `--latencies` it does nothing, so the
 scorecard can never be mistaken for a demo.
