@@ -62,6 +62,12 @@ from forge.defenders import (
 from forge.payments.decline_codes import DeclineCodeTaxonomy
 from forge.payments.idempotency import IdempotencyManager
 from forge.payments.state_machine import PaymentStateMachine
+# Lifecycle has its own 5-country table; main.py's COUNTRY_CURRENCY above covers
+# 14 countries and would KeyError inside the engine, so it stays aliased.
+from forge.lifecycle.aggregate import build_aggregate
+from forge.lifecycle.engine import LifecycleEngine
+from forge.lifecycle.rates import COUNTRY_CURRENCY as LIFECYCLE_COUNTRY_CURRENCY
+from forge.lifecycle.reconciliation import events_from_file, reconcile
 
 def is_local_or_private_target(url: str) -> bool:
     """Return True if target is a loopback, local development, or private network address."""
@@ -611,6 +617,95 @@ def cmd_maturity(a: argparse.Namespace) -> int:
     print("─" * 56)
     return 0
 
+
+def cmd_lifecycle(a: argparse.Namespace) -> int:
+    try:
+        with open(a.events, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+        events = data["events"]
+        if not isinstance(events, list):
+            raise TypeError("'events' must be a list")
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        print(bad(f"Cannot read events file {a.events}: {e}"))
+        return 1
+
+    result = LifecycleEngine(events).run(country=a.country)
+    agg = build_aggregate(result.tracks)
+    currency = LIFECYCLE_COUNTRY_CURRENCY[a.country]
+
+    if a.json:
+        print(json.dumps({
+            "tracks": result.tracks,
+            "aggregate": agg.__dict__,
+            "audit": [record.__dict__ for record in result.history],
+            "currency": currency,
+            "expected_units": result.converted_units_expected,
+        }, indent=2))
+        return 0
+
+    print(bold(f"\n forge lifecycle — {a.country}\n" + "─" * 56))
+    print(bold("Lifecycle Trace:"))
+    for rec in result.history:
+        if rec.result == "applied":
+            badge = ok(rec.result)
+        elif rec.result == "duplicate":
+            badge = warn(rec.result)
+        else:
+            badge = bad(rec.result)
+        print(f"  {rec.event_id} {rec.type} -> {badge} ({dim(rec.reason)})")
+    print(bold("Tracks:"))
+    for track, state in result.tracks.items():
+        print(f"  {track:<13}: {state if state is not None else dim('(pending)')}")
+    print(f"  Summary : {agg.summary}")
+    print(f"  Amount  : {currency} {result.converted_units_expected}")
+    print(f"  $1 rule  : expected {result.converted_units_expected} minor units")
+    print("─" * 56)
+    return 0
+
+
+def cmd_reconcile(a: argparse.Namespace) -> int:
+    try:
+        internal = events_from_file(a.internal)
+        external = events_from_file(a.external)
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as e:
+        print(bad(f"Cannot read events file: {e}"))
+        return 1
+    if not isinstance(internal, list) or not isinstance(external, list):
+        print(bad("'events' must be a list in both files"))
+        return 1
+
+    report = reconcile(internal, external)
+
+    if a.json:
+        print(json.dumps({
+            "rows": [row.__dict__ for row in report.rows],
+            "counts": report.counts,
+            "matches": report.matches,
+            "mismatches": report.mismatches,
+            "missing_external": report.missing_external,
+            "unexpected_external": report.unexpected_external,
+        }, indent=2))
+        return 0
+
+    print(bold("\n forge reconcile\n" + "─" * 56))
+    if not report.rows:
+        print(dim("  no rows — both event files are empty"))
+    for row in report.rows:
+        if row.status == "match":
+            badge = ok(row.status)
+        elif row.status == "mismatch":
+            badge = bad(row.status)
+        else:
+            badge = warn(row.status)
+        diff = f" [{', '.join(row.diffs)}]" if row.diffs else ""
+        print(f"  {row.event_id} {badge}{diff}")
+    print(dim("─" * 56))
+    print(f"  Counts: match={report.counts['match']} mismatch={report.counts['mismatch']} "
+          f"missing_external={report.counts['missing_external']} unexpected_external={report.counts['unexpected_external']}")
+    print("─" * 56)
+    return 0
+
+
 def cmd_selftest(a: argparse.Namespace) -> int:
     for c in COUNTRIES:
         fz = make_fullz(c)
@@ -747,6 +842,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_mat.add_argument("--audit-log", default=None,
                        help="Path to a JSON event log to grade for forensic completeness")
     p_mat.add_argument("--json", action="store_true")
+
+    # lifecycle
+    p_life = sub.add_parser("lifecycle", help="Event-driven per-track lifecycle simulator (mock-only)")
+    p_life.add_argument("--events", required=True, help="Path to event file ({\"events\": [...]})")
+    p_life.add_argument("--country", default="US", choices=list(LIFECYCLE_COUNTRY_CURRENCY))
+    p_life.add_argument("--json", action="store_true")
+
+    # reconcile
+    p_rec = sub.add_parser("reconcile", help="Phase-1 reconciliation over event files")
+    p_rec.add_argument("--internal", required=True, help="Path to internal event file")
+    p_rec.add_argument("--external", required=True, help="Path to external event file")
+    p_rec.add_argument("--json", action="store_true")
     return p
 
 
@@ -782,6 +889,10 @@ def main() -> int:
             return cmd_currency(args)
         elif args.cmd == "maturity":
             return cmd_maturity(args)
+        elif args.cmd == "lifecycle":
+            return cmd_lifecycle(args)
+        elif args.cmd == "reconcile":
+            return cmd_reconcile(args)
         else:
             parser.print_help()
             return 0

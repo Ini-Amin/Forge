@@ -536,3 +536,66 @@ def test_running_the_suite_offline_is_fast():
                    capture_output=True, text=True)
     assert _time.monotonic() - start < 5.0
 
+
+
+HAPPY_FILE = {"events": [
+    {"event_id": "e1", "type": "auth.accepted", "occurred_at": "2026-11-03T10:00:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e2", "type": "capture.accepted", "occurred_at": "2026-11-03T10:01:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e3", "type": "clearing.submitted", "occurred_at": "2026-11-03T10:02:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e4", "type": "clearing.accepted", "occurred_at": "2026-11-03T10:03:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e5", "type": "settlement.submitted", "occurred_at": "2026-11-03T10:04:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e6", "type": "settlement.accepted", "occurred_at": "2026-11-03T10:05:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+]}
+
+
+def test_lifecycle_cli_json(tmp_path):
+    """forge lifecycle --events happy.json --json is hermetic and machine-readable."""
+    f = tmp_path / "happy.json"
+    f.write_text(json.dumps(HAPPY_FILE))
+    r = subprocess.run([sys.executable, "forge.py", "lifecycle", "--events", str(f), "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["tracks"]["settlement"] == "SETTLED"
+    assert data["aggregate"]["summary"] == "settled"
+    assert len(data["audit"]) == 6
+    assert all(x["result"] == "applied" for x in data["audit"])
+
+
+def test_lifecycle_cli_jpy_conversion(tmp_path):
+    """$1 in US converts to ¥150 when the run targets JP; only $1 accepted."""
+    f = tmp_path / "happy_jpy.json"
+    evs = [{**e, "currency": "JPY", "amount_units": 150} for e in HAPPY_FILE["events"]]
+    f.write_text(json.dumps({"events": evs}))
+    r = subprocess.run([sys.executable, "forge.py", "lifecycle", "--events", str(f), "--country", "JP", "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["tracks"]["settlement"] == "SETTLED"
+    assert data["currency"] == "JPY"
+    assert data["expected_units"] == 150
+
+
+def test_lifecycle_cli_bad_amount_rejected(tmp_path):
+    f = tmp_path / "bad.json"
+    evs = [dict(HAPPY_FILE["events"][0]), {**HAPPY_FILE["events"][1], "amount_units": 200}]
+    f.write_text(json.dumps({"events": evs}))
+    r = subprocess.run([sys.executable, "forge.py", "lifecycle", "--events", str(f), "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["audit"][1]["result"] == "rejected"
+    assert "only $1.00" in data["audit"][1]["reason"]
+
+
+def test_reconcile_cli(tmp_path):
+    int_f = tmp_path / "internal.json"
+    ext_f = tmp_path / "external.json"
+    int_f.write_text(json.dumps({"events": HAPPY_FILE["events"]}))
+    ext_f.write_text(json.dumps({"events": HAPPY_FILE["events"]}))
+    r = subprocess.run([sys.executable, "forge.py", "reconcile",
+                        "--internal", str(int_f), "--external", str(ext_f), "--json"],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    data = json.loads(r.stdout)
+    assert data["counts"]["match"] == 6
