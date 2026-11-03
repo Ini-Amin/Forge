@@ -1,5 +1,16 @@
 import unittest
 
+from forge.lifecycle.engine import LifecycleEngine
+
+HAPPY = [
+    {"event_id": "e1", "type": "auth.accepted", "occurred_at": "2026-11-03T10:00:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e2", "type": "capture.accepted", "occurred_at": "2026-11-03T10:01:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e3", "type": "clearing.submitted", "occurred_at": "2026-11-03T10:02:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e4", "type": "clearing.accepted", "occurred_at": "2026-11-03T10:03:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e5", "type": "settlement.submitted", "occurred_at": "2026-11-03T10:04:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+    {"event_id": "e6", "type": "settlement.accepted", "occurred_at": "2026-11-03T10:05:00Z", "source": "mock-file", "amount_units": 100, "currency": "USD"},
+]
+
 
 class TestRates(unittest.TestCase):
     def test_converted_units_known_currencies(self):
@@ -31,3 +42,48 @@ class TestTransitions(unittest.TestCase):
         ok, reason = evaluate_guard("eligible_auth", {"authorization": "AUTHORIZED"}, 0)
         self.assertFalse(ok)
         self.assertIn("remaining", reason)
+
+
+class TestEngine(unittest.TestCase):
+    def test_happy_path_settles(self):
+        res = LifecycleEngine(HAPPY).run()
+        self.assertEqual(res.tracks["settlement"], "SETTLED")
+        self.assertEqual([r.result for r in res.history], ["applied"] * 6)
+        self.assertEqual(len(res.history), 6)
+
+    def test_out_of_order_rejected(self):
+        # capture before auth
+        events = [HAPPY[1]] + [HAPPY[0]] + HAPPY[2:]
+        res = LifecycleEngine(events).run()
+        self.assertEqual(res.history[0].result, "rejected")
+        self.assertIn("eligible authorization", res.history[0].reason)
+
+    def test_wrong_amount_rejected(self):
+        events = [dict(HAPPY[0]), dict(HAPPY[1], amount_units=200)]
+        res = LifecycleEngine(events).run()
+        self.assertEqual(res.history[1].result, "rejected")
+        self.assertIn("$1", res.history[1].reason)
+
+    def test_phase2_event_inactive(self):
+        events = [dict(HAPPY[0]), {"event_id": "x", "type": "refund.accepted", "occurred_at": "t", "source": "mock-file", "amount_units": 100, "currency": "USD"}]
+        res = LifecycleEngine(events).run()
+        self.assertEqual(res.history[1].result, "rejected")
+        self.assertIn("inactive", res.history[1].reason)
+
+    def test_duplicate_event_id(self):
+        events = [dict(HAPPY[0])] + [dict(HAPPY[0])]
+        res = LifecycleEngine(events).run()
+        self.assertEqual([r.result for r in res.history], ["applied", "duplicate"])
+        self.assertEqual(res.tracks["authorization"], "AUTHORIZED")  # unchanged by replay
+
+    def test_replayable_and_hermetic(self):
+        r1 = LifecycleEngine(HAPPY).run()
+        r2 = LifecycleEngine(HAPPY).run()
+        self.assertEqual([r.result for r in r1.history], [r.result for r in r2.history])
+        self.assertEqual(r1.tracks, r2.tracks)
+
+    def test_unknown_event_type(self):
+        events = [dict(HAPPY[0]), {"event_id": "u", "type": "bogus.event", "occurred_at": "t", "source": "mock-file", "amount_units": 100, "currency": "USD"}]
+        res = LifecycleEngine(events).run()
+        self.assertEqual(res.history[1].result, "rejected")
+        self.assertIn("unknown", res.history[1].reason)
