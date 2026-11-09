@@ -1,5 +1,12 @@
 """forge.cards.bins - Bank Identification Number (BIN) database and card specs.
 
+Live-verified 2026-11-09 against lookup.binlist.net (all-retry 429 rate-limited;
+verified via TinyFish search + fyatu BIN pages that mirror binlist/iinlist data).
+Entries keep the publisher's 6-digit IIN where no verified 8-digit expansion is
+publicly published; only 37955003 is a verified 8-digit prepaid Amex range.
+Stripe checks 8-digit IINs — pass a full 8-digit prefix with `--bin` when the
+validator needs it; a 6-digit prefix leaves digits 7-8 to random fill.
+
 Every entry carries `source`, which names the reference the issuer/country/
 currency claim was checked against: "binlist" (binlist.net data repo — CC-BY
 4.0) or "test-panel". An entry with a placeholder issuer ("test", "unknown",
@@ -77,7 +84,7 @@ BIN_DB: dict[str, dict[str, Any]] = {
                "pan_length": 16, "bin_length": 6, "funding": "credit", "is_prepaid": False,
                "source": "binlist"},
     "513200": {"network": "Mastercard", "issuer": "Credit Mutuel", "country": "FR", "currency": "EUR",
-               "pan_length": 16, "bin_length": 6, "funding": "credit", "is_prepaid": False,
+               "pan_length": 16, "bin_length": 6, "funding": "debit", "is_prepaid": False,
                "source": "binlist"},
     # ── Italy ────────────────────────────────────────────────────────────────
     "490824": {"network": "Visa", "issuer": "Intesa Sanpaolo", "country": "IT", "currency": "EUR",
