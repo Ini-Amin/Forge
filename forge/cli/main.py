@@ -154,6 +154,85 @@ def _resolve_bin_or_fail(a: argparse.Namespace, country: Optional[str]) -> Optio
     return default_bin
 
 
+def _network_matches(alias: str, network: str) -> bool:
+    """Match a user-typed network alias against the canonical network.
+
+    'amex' must hit 'American Express', etc. — substring alone would
+    miss the canonical name.
+    """
+    low = (alias or "").strip().lower()
+    net = (network or "").lower()
+    if low in net:
+        return True
+    aliases = {
+        "amex": "american express",
+        "americanexpress": "american express",
+        "mc": "mastercard",
+        "jcb": "jcb",
+    }
+    if aliases.get(low):
+        return aliases[low] in net
+    return False
+
+
+def _prompt_bin_choice(country: str) -> Optional[str]:
+    """Show every BIN on file for `country` and let the wizard pick one.
+
+    The wizard used to silently take the country default after the region
+    prompt, so `forge` (no flags) never told you which issuer/network you
+    were about to audit. The list is the same one `forge issuer list
+    --country XX` prints, numbered so you can pick by digit, by network
+    name ("amex", "mastercard", ...) or by typing a BIN prefix directly.
+    """
+    rows = bins_by(country=country)
+    if not rows:
+        return None
+    ordered = sorted(rows.items(), key=lambda kv: (kv[1]["network"], kv[1]["issuer"], kv[0]))
+    default_bin = get_default_bin_for_country(country)
+
+    print(bold(f"\n  BIN / network for {country}"))
+    for idx, (bin_, meta) in enumerate(ordered, start=1):
+        tag = " *" if bin_ == default_bin else ""
+        print(
+            f"   [{idx}]{tag:<2} {meta['network']:<10} {meta['issuer']:<28} "
+            f"{bin_} ({meta['currency']}, {meta['funding']})"
+        )
+    if default_bin:
+        print(dim(f"   * default for {country}: BIN {default_bin}"))
+    print(dim("   Type 1-N, a network name (amex/mastercard/visa/...), or a BIN prefix. Enter = default."))
+
+    raw = _ask("  Pick BIN/Network", default_bin or "")
+    if not raw or raw == (default_bin or ""):
+        return default_bin
+
+    low = raw.strip().lower()
+    import re as _re
+    # Robust tokens: accept "1", "1 378282", "[1] American Express 378282", "378282", "amex"...
+    # Old parser returned the whole raw string ("1 378282") on fallback, which
+    # then missed issuer_lookup and failed the funnel with "BIN 1 378282 is not...".
+    parts = low.replace("[", " ").replace("]", " ").replace("(", " ").replace(")", " ").split()
+    # 1. Explicit BIN token (6-8 digits) anywhere in the input wins
+    for part in parts:
+        if part.isdigit() and len(part) in (6, 8) and part in rows:
+            return part
+    # 2. Bare 1-N index (also as "1 378282" where first token is the index)
+    for part in parts:
+        if part.isdigit() and len(part) <= 2:
+            try:
+                idx = int(part)
+                if 1 <= idx <= len(ordered):
+                    return ordered[idx - 1][0]
+            except ValueError:
+                pass
+            break
+    # 3. Network-name match, e.g. "amex", "mastercard", "visa", "discover".
+    for token in parts:
+        for bin_, meta in ordered:
+            if _network_matches(token, meta["network"]):
+                return bin_
+    return raw
+
+
 def cmd_id(a: argparse.Namespace) -> int:
     country = a.country.upper() if a.country else "US"
     fz = make_fullz(country, seed=a.seed)
@@ -279,6 +358,24 @@ def cmd_run(a: argparse.Namespace) -> int:
     country = getattr(a, "country", None) or (_ask("1. Target Region (US/GB/JP/ID/DE/BR/CA/FR/IT/ES/AU/SG/NL/SE)", "US").upper() if tty else "US")
     if country not in COUNTRIES:
         country = "US"
+
+    # Interactive BIN/Network picker: runs before target prompt so the
+    # audited issuer is explicit. Explicit --bin wins; --network resolves
+    # even non-interactively (flags must not depend on tty).
+    if getattr(a, "bin", None) is None:
+        network_flag = getattr(a, "network", None)
+        if network_flag:
+            candidates = bins_by(country=country)
+            matches = sorted(
+                (b, m) for b, m in candidates.items()
+                if _network_matches(str(network_flag), m["network"])
+            )
+            if matches:
+                a.bin = matches[0][0]
+        elif tty:
+            chosen = _prompt_bin_choice(country)
+            if chosen:
+                a.bin = chosen
 
     target = getattr(a, "target", None)
     if target is None:
@@ -751,7 +848,7 @@ def build_parser() -> argparse.ArgumentParser:
     # bin
     p_bin = sub.add_parser("bin", help="Generate Luhn test cards")
     p_bin.add_argument("--country", default=None, help="Auto-pick a geo-coherent BIN for this country")
-    p_bin.add_argument("--bin", default=None, help="Explicit BIN/PAN prefix (default: geo-coherent for country, or 414720)")
+    p_bin.add_argument("--bin", default=None, help="Explicit BIN/PAN prefix (default: geo-coherent for --country, else US 414720). Prefix is kept verbatim; pass a full 8-digit BIN if your validator (e.g. Stripe) checks the 8-digit IIN - a 6-digit prefix leaves digits 7-8 to random fill.")
     p_bin.add_argument("--allow-unknown-bin", action="store_true",
                        help="Generate for a prefix absent from the issuer DB (issuer metadata will be unknown)")
     p_bin.add_argument("-n", "--count", type=int, default=5)
@@ -788,6 +885,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("-c", "--country", choices=COUNTRIES, default=None)
     p_run.add_argument("-t", "--target", default=None)
     p_run.add_argument("--auth", default=None, help="Authorization / Bearer token")
+    p_run.add_argument("--bin", default=None, help="Explicit BIN/PAN prefix (skips BIN picker)")
+    p_run.add_argument("--network", default=None, help="Filter BIN picker by network substring (e.g. amex, mastercard; skips picker)")
+    p_run.add_argument("--allow-unknown-bin", action="store_true", help="Proceed with a BIN absent from the issuer DB")
+    p_run.add_argument("-n", "--count", default=None, help="Number of test card fixtures (default: prompt or 5)")
     p_run.add_argument("--method", choices=["GET", "POST"], default=None, help="HTTP method for target probe")
     p_run.add_argument("-o", "--output", default=None, help="Path to save audit report JSON")
     p_run.add_argument("--asn-type", choices=["residential", "datacenter", "hosting", "vpn", "unknown"],
